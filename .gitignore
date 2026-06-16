@@ -1,0 +1,9 @@
+node_modules/
+main.js
+.workbuddy/
+*.log
+*_backup
+*_broken
+*_clean
+*temp_check
+sync.sh

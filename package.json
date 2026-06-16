@@ -1,0 +1,22 @@
+{
+  "name": "obsidian-atomic-notes",
+  "version": "1.0.0",
+  "description": "从文章/链接/选中文本中提炼原子笔记，自动去重后存入知识库",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "sync": "bash sync.sh",
+    "sync:dev": "bash sync.sh --dev",
+    "sync:check": "bash sync.sh --check"
+  },
+  "keywords": ["obsidian", "plugin", "atomic", "notes", "AI"],
+  "author": "pokerhu",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "obsidian": "^1.0.0",
+    "typescript": "^5.0.0",
+    "esbuild": "^0.20.0"
+  }
+}

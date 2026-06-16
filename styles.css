@@ -1,0 +1,65 @@
+/* Atomic Notes Extractor Styles */
+
+.atomic-notes-steps {
+  margin-bottom: 16px;
+}
+
+.atomic-notes-steps ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.atomic-notes-steps li {
+  padding: 4px 0;
+}
+
+.atomic-notes-dedup-report {
+  background-color: var(--background-secondary);
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.atomic-notes-list {
+  margin-bottom: 16px;
+}
+
+.atomic-notes-item {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.atomic-notes-item h4 {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.atomic-notes-preview {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.atomic-notes-meta {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.atomic-notes-summary {
+  font-weight: bold;
+  margin-top: 8px;
+}
+
+.atomic-notes-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.atomic-notes-error {
+  color: var(--text-error);
+  font-weight: bold;
+}

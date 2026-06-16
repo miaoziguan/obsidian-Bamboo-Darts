@@ -1,0 +1,10 @@
+{
+  "id": "atomic-notes-extractor",
+  "name": "竹叶飞刃",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "AI 提炼原子笔记，过滤信息垃圾，把阅读转化为可检索的知识节点。",
+  "author": "羽鳞君",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

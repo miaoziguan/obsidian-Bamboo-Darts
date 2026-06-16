@@ -1,0 +1,46 @@
+/**
+ * 集中管理所有魔法数字
+ * 从各个模块提取硬编码数值，统一管理便于调整
+ */
+
+/** 相似度阈值（同批交叉去重 & 知识库比对） */
+export const SIMILARITY_THRESHOLD = 0.5;
+
+/** 内容最小长度——硬阻断（质量门控） */
+export const GATE_MIN_CONTENT_LENGTH = 50;
+
+/** 内容最小长度——警告但允许继续（质量门控） */
+export const GATE_WARN_CONTENT_LENGTH = 200;
+
+/** 内容最大长度（质量门控） */
+export const MAX_CONTENT_LENGTH = 50000;
+
+/** 重复内容相似度阈值（质量门控） */
+export const GATE_DUPLICATE_THRESHOLD = 0.5;
+
+/** 信息密度——警告阈值（去重词数/总词数） */
+export const GATE_WARN_DENSITY = 0.3;
+
+/** 信息密度——硬阻断阈值 */
+export const GATE_MIN_DENSITY = 0.1;
+
+/** 噪声占比——警告阈值 */
+export const GATE_WARN_NOISE_RATIO = 0.4;
+
+/** 噪声占比——硬阻断阈值 */
+export const GATE_MAX_NOISE_RATIO = 0.7;
+
+/** AI 调用的 temperature 参数 */
+export const AI_TEMPERATURE = 0.3;
+
+/** 输入截断长度（限制发送给 AI 的文本量） */
+export const INPUT_TRUNCATE_LENGTH = 10000;
+
+/** 文件名最大长度 */
+export const MAX_FILENAME_LENGTH = 100;
+
+/** 最短笔记内容长度（子弹笔记允许短内容，但不能为空） */
+export const MIN_NOTE_CONTENT_LENGTH = 10;
+
+/** 知识库去重并行批次大小 */
+export const DEDUP_BATCH_SIZE = 20;
