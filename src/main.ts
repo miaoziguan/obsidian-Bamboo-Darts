@@ -1,5 +1,5 @@
 /**
- * Atomic Notes Extractor - 主入口文件
+ * Bamboo Darts - 主入口文件
  *
  * 功能：从文章/链接/选中文本中提炼原子笔记，自动去重后存入知识库
  */
@@ -35,7 +35,7 @@ export default class AtomicNotesPlugin extends Plugin {
   _isExtracting: boolean = false; // Bug #2 修复：显式声明属性
 
   async onload() {
-    console.log('Atomic Notes Extractor 插件加载中...');
+    console.log('Bamboo Darts 插件加载中...');
 
     // 加载设置
     await this.loadSettings();
@@ -95,11 +95,11 @@ export default class AtomicNotesPlugin extends Plugin {
       })
     );
 
-    console.log('Atomic Notes Extractor 插件加载完成');
+    console.log('Bamboo Darts 插件加载完成');
   }
 
   async onunload() {
-    console.log('Atomic Notes Extractor 插件已卸载');
+    console.log('Bamboo Darts 插件已卸载');
   }
 
   async loadSettings() {
