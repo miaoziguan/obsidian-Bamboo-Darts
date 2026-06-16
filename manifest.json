@@ -1,9 +1,9 @@
 {
   "id": "atomic-notes-extractor",
-  "name": "竹叶飞刃",
+  "name": "Bamboo Darts",
   "version": "1.0.2",
   "minAppVersion": "1.0.0",
-  "description": "AI 提炼原子笔记，过滤信息垃圾，把阅读转化为可检索的知识节点。",
+  "description": "竹叶飞刃：AI 提炼子弹笔记，过滤信息垃圾，把阅读转化为可检索的知识节点。",
   "author": "羽鳞君",
   "authorUrl": "",
   "isDesktopOnly": false
