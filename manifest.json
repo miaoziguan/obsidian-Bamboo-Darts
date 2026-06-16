@@ -1,9 +1,9 @@
 {
   "id": "atomic-notes-extractor",
   "name": "Bamboo Darts",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "minAppVersion": "1.0.0",
-  "description": "Bamboo Darts: AI-powered atomic note extraction for your Obsidian vault.",
+  "description": "Extract atomic notes from your vault using AI.",
   "author": "羽鳞君",
   "authorUrl": "",
   "isDesktopOnly": false
