@@ -72,7 +72,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
 export class AtomicNotesSettingTab extends PluginSettingTab {
   plugin: AtomicNotesPlugin;
-  icon: string = 'square-dashed-bottom-code';
+  icon: string = 'atom';
 
   constructor(app: App, plugin: AtomicNotesPlugin) {
     super(app, plugin);
