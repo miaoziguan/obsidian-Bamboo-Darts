@@ -19,7 +19,7 @@ export interface ReviewConfig {
   maxTokens: number;
 }
 
-export interface ReviewResult {
+interface ReviewResult {
   index: number;        // 笔记序号（0-based）
   insightScore: number;  // 洞见价值得分（1-5）
   knowledgeScore: number;// 知识价值得分（1-5）

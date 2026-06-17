@@ -8,22 +8,7 @@ import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem } from 'obsidian';
 import { AtomicNotesSettingTab, PluginSettings, DEFAULT_SETTINGS } from './ui/setting-tab';
 import { runExtraction } from './extractor';
 import { checkAgainstVault } from './deduplicator';
-
-/**
- * 清洗剪贴板中的图片噪音：base64 / Markdown 图片 / HTML img / 图片 URL / 裸文件名 / 占位符
- */
-function stripImageNoise(text: string): string {
-  let cleaned = text;
-  cleaned = cleaned.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/gi, '');
-  cleaned = cleaned.replace(/!\[.*?\]\(.*?\)/g, '');
-  cleaned = cleaned.replace(/<img[^>]*\/?>/gi, '');
-  cleaned = cleaned.replace(/^https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)(?:\?[^\s]*)?$/gim, '');
-  cleaned = cleaned.replace(/^[\w-]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)\s*$/gim, '');
-  cleaned = cleaned.replace(/^图(?:片)?\s*$/gim, '');
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
-  return cleaned.trim();
-}
-import { saveNotes } from './storage';
+import { stripImageNoise } from './utils/clipboard';
 import { ResultModal } from './ui/result-modal';
 import { InputModal } from './ui/input-modal';
 import { AtomicNotesPanel, VIEW_TYPE_ATOMIC_PANEL } from './ui/panel-view';
@@ -228,7 +213,6 @@ export default class AtomicNotesPlugin extends Plugin {
           deepseekApiUrl: this.settings.deepseekApiUrl,
           model: this.settings.model,
           maxTokens: this.settings.maxTokens,
-          extractionMode: 'ai',
           tagPreferences: this.settings.tagPreferences,
           tagMode: this.settings.tagMode,
           factCheck: this.settings.factCheck,

@@ -8,7 +8,7 @@
  * - Phase 6: 笔记复查（可选）
  */
 
-import { requestUrl, MarkdownView, Editor } from 'obsidian';
+import { requestUrl } from 'obsidian';
 import { runGateChecks } from './utils/gate-rules';
 import { parseAINoteOutput, AtomicNote, validateAtomicNote, ensureTags } from './utils/notes-standards';
 import { crossCheckBatch } from './deduplicator';
@@ -83,7 +83,7 @@ interface ReadResult {
  * Phase 1: 读取内容（URL/文本/文件）
  */
 async function readContent(
-  input: { type: 'url' | 'text' | 'selection'; content: string; editor?: Editor; view?: MarkdownView }
+  input: { type: 'url' | 'text' | 'selection'; content: string }
 ): Promise<ReadResult> {
   if (input.type === 'url') {
     try {
@@ -136,16 +136,6 @@ async function readContent(
 }
 
 // ─── Phase 2: 质量门控 ───
-
-/**
- * Phase 2: 质量门控
- */
-function runQualityGate(
-  content: string,
-  processedContents: string[] = []
-): { passed: boolean; reasons: string[] } {
-  return runGateChecks(content, processedContents);
-}
 
 // ─── Phase 3: 提炼原子笔记（AI 模式） ───
 
@@ -250,8 +240,6 @@ export async function runExtraction(
   input: {
     type: 'url' | 'text' | 'selection';
     content: string;
-    editor?: Editor;
-    view?: MarkdownView;
   },
   config: Partial<ExtractorConfig> = {}
 ): Promise<ExtractionResult> {
@@ -273,7 +261,7 @@ export async function runExtraction(
 
   // Phase 2: 质量门控
   addStep(steps, 'Phase 2: 质量门控', 'success', '开始检查...');
-  const gateResult = runQualityGate(content);
+  const gateResult = runGateChecks(content);
 
   if (!gateResult.passed) {
     updateLastStep(steps, 'failed', gateResult.reasons.join('; '));

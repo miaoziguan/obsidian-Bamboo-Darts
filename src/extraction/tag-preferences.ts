@@ -6,7 +6,7 @@
 import { INPUT_TRUNCATE_LENGTH } from '../constants';
 
 /** Base system prompt for atomic notes extraction */
-export const BASE_SYSTEM_PROMPT = `你是一个专业的知识提炼助手。你的任务是从用户提供的文章/文本中提炼出高质量的原子笔记（子弹笔记 / Bullet Note）。
+const BASE_SYSTEM_PROMPT = `你是一个专业的知识提炼助手。你的任务是从用户提供的文章/文本中提炼出高质量的原子笔记（子弹笔记 / Bullet Note）。
 
 # 子弹笔记（Atomic Note）核心理念
 每一条笔记都是一颗独立的「子弹」——短小精悍、自包含、可复用。不是文章摘要，不是要点列表，而是从原文中提炼出的、有独立价值的洞见碎片。

@@ -7,45 +7,16 @@ import {
   ItemView,
   WorkspaceLeaf,
   Notice,
-  Vault,
-  App,
-  MarkdownView,
 } from 'obsidian';
 import { buildSimilarityMatrix, NoteMeta } from '../discovery/similarity-matrix';
 import { extractKeywords } from '../discovery/keywords';
 import { ExtractionHistoryEntry } from '../services/history-service';
+import { stripImageNoise } from '../utils/clipboard';
 
 export const VIEW_TYPE_ATOMIC_PANEL = 'atomic-notes-panel';
 
-/**
- * 清洗剪贴板中的图片噪音：
- * - base64 内嵌图片数据（可能极长）
- * - Markdown 图片语法 ![alt](url)
- * - HTML <img> 标签
- * - 独立成行的图片文件 URL
- */
-function stripImageNoise(text: string): string {
-  let cleaned = text;
-  // base64 图片（可能非常长，优先处理）
-  cleaned = cleaned.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/gi, '');
-  // Markdown 图片
-  cleaned = cleaned.replace(/!\[.*?\]\(.*?\)/g, '');
-  // HTML img 标签
-  cleaned = cleaned.replace(/<img[^>]*\/?>/gi, '');
-  // 独立成行的图片文件 URL（带协议头）
-  cleaned = cleaned.replace(/^https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)(?:\?[^\s]*)?$/gim, '');
-  // 独立成行的裸图片文件名（复制网页时图片被替换为文件名）
-  cleaned = cleaned.replace(/^[\w-]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)\s*$/gim, '');
-  // 微信等平台图片占位符（独立成行的「图片」「图」）
-  cleaned = cleaned.replace(/^图(?:片)?\s*$/gim, '');
-  // 清理多余空行
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
-  return cleaned.trim();
-}
-
 export class AtomicNotesPanel extends ItemView {
   private plugin: any; // AtomicNotesPlugin reference
-  private currentTab: 'input' | 'history' | 'discover' | 'about' = 'input';
 
   constructor(leaf: WorkspaceLeaf, plugin: any) {
     super(leaf);
@@ -449,7 +420,6 @@ export class AtomicNotesPanel extends ItemView {
           tabs[j].classList.toggle('active', j === i);
           contentPanels[j].classList.toggle('active', j === i);
         }
-        this.currentTab = tabKeys[i];
 
         if (i === 1) {
           renderHistory(historyPanel);

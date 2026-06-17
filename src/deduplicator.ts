@@ -7,15 +7,16 @@
 import { Vault } from 'obsidian';
 import { AtomicNote } from './utils/notes-standards';
 import { SIMILARITY_THRESHOLD, DEDUP_BATCH_SIZE } from './constants';
+import { extractKeywords } from './discovery/keywords';
 
-export interface DuplicateInfo {
+interface DuplicateInfo {
   isDuplicate: boolean;
   similarity: number;
   matchedNote?: string; // 匹配的笔记路径
   matchedContent?: string; // 匹配的内容片段
 }
 
-export interface DedupResult {
+interface DedupResult {
   uniqueNotes: AtomicNote[];
   removedCount: number;
   duplicates: DuplicateInfo[];
@@ -123,7 +124,7 @@ export async function checkAgainstVault(
 }
 
 /**
- * 计算两段文本的相似度（基于关键词重合度）
+ * 计算两段文本的相似度（基于关键词 Jaccard 相似度）
  */
 function calculateTextSimilarity(text1: string, text2: string): number {
   const words1 = extractKeywords(text1);
@@ -136,52 +137,4 @@ function calculateTextSimilarity(text1: string, text2: string): number {
   const union = new Set([...words1, ...words2]);
 
   return intersection.size / union.size;
-}
-
-/**
- * 提取关键词（简单实现：分词 + 去停用词）
- */
-function extractKeywords(text: string): Set<string> {
-  // 简单分词（按空格、标点分割）
-  const words = text
-    .toLowerCase()
-    .replace(/[^\w\s\u4e00-\u9fff]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length >= 2); // 只保留长度 >= 2 的词
-
-  // 常见停用词
-  const stopWords = new Set([
-    '的', '了', '在', '是', '我', '有', '和', '就', '不', '人',
-    '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你',
-    '会', '着', '没有', '看', '好', '自己', '这',
-    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-    'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
-  ]);
-
-  return new Set(words.filter(w => !stopWords.has(w)));
-}
-
-/**
- * 生成去重报告
- */
-function generateDedupReport(
-  duplicates: DuplicateInfo[]
-): string {
-  if (duplicates.length === 0) {
-    return '未检测到重复笔记';
-  }
-
-  let report = `检测到 ${duplicates.length} 条可能重复的笔记：\n\n`;
-
-  for (const dup of duplicates) {
-    report += `- **相似度**: ${(dup.similarity * 100).toFixed(1)}%\n`;
-    if (dup.matchedNote) {
-      report += `  **匹配笔记**: ${dup.matchedNote}\n`;
-    }
-    if (dup.matchedContent) {
-      report += `  **内容片段**: ${dup.matchedContent}\n\n`;
-    }
-  }
-
-  return report;
 }

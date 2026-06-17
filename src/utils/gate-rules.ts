@@ -257,39 +257,18 @@ function calculateSimilarity(str1: string, str2: string): number {
   const s1 = str1.toLowerCase().replace(/\s+/g, '').slice(0, 1000);
   const s2 = str2.toLowerCase().replace(/\s+/g, '').slice(0, 1000);
 
-  if (s1.length === 0 || s2.length === 0) return 0;
+  if (s1.length < 2 || s2.length < 2) return 0;
 
   const lenRatio = Math.min(s1.length, s2.length) / Math.max(s1.length, s2.length);
   if (lenRatio < 0.5) return 0;
 
-  const distance = levenshteinDistance(s1, s2);
-  const maxLen = Math.max(s1.length, s2.length);
-  return 1 - distance / maxLen;
-}
-
-function levenshteinDistance(str1: string, str2: string): number {
-  const len1 = str1.length;
-  const len2 = str2.length;
-
-  const matrix = Array(len1 + 1)
-    .fill(null)
-    .map(() => Array(len2 + 1).fill(0));
-
-  for (let i = 0; i <= len1; i++) matrix[i][0] = i;
-  for (let j = 0; j <= len2; j++) matrix[0][j] = j;
-
-  for (let i = 1; i <= len1; i++) {
-    for (let j = 1; j <= len2; j++) {
-      const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
-      );
-    }
-  }
-
-  return matrix[len1][len2];
+  // Character bigram Jaccard — simpler and faster than Levenshtein
+  const bigrams = (s: string) => new Set(Array.from({ length: s.length - 1 }, (_, i) => s.slice(i, i + 2)));
+  const a = bigrams(s1);
+  const b = bigrams(s2);
+  const intersection = new Set([...a].filter(x => b.has(x)));
+  const union = new Set([...a, ...b]);
+  return intersection.size / union.size;
 }
 
 // ─── 综合门控 ───

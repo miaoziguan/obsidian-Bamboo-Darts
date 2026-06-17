@@ -3,6 +3,7 @@
  * 从 main.js 中反混淆而来：_verifyFacts, ke（事实提取函数）
  */
 
+import { requestUrl } from 'obsidian';
 import { AtomicNote } from '../utils/notes-standards';
 
 interface FactItem {
@@ -17,7 +18,7 @@ interface VerificationItem {
   noteIndex?: number;
 }
 
-export interface FactCheckResult {
+interface FactCheckResult {
   notes: AtomicNote[];
   verified: number;
   doubtful: number;
@@ -26,7 +27,7 @@ export interface FactCheckResult {
 }
 
 /** Extract key facts from note content */
-export function extractFacts(content: string): FactItem[] {
+function extractFacts(content: string): FactItem[] {
   const facts: FactItem[] = [];
   const sentences = content.split(/[。！？\n\.!\?]+/);
 
@@ -93,7 +94,8 @@ export async function verifyFacts(
   const userPrompt = `原文：${originalContent.slice(0, 4000)}\n\n声明列表：\n${factsList}`;
 
   try {
-    const response = await fetch(config.deepseekApiUrl, {
+    const response = await requestUrl({
+      url: config.deepseekApiUrl,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -110,9 +112,9 @@ export async function verifyFacts(
       }),
     });
 
-    if (!response.ok) throw new Error(`API ${response.status}`);
+    if (response.status !== 200) throw new Error(`API ${response.status}`);
 
-    const data = await response.json();
+    const data = response.json;
     const rawOutput = data.choices?.[0]?.message?.content || '';
 
     try {

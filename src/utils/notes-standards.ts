@@ -507,7 +507,7 @@ function safeTruncate(text: string, maxLen: number): string {
  * 确保每条笔记都有标题
  * 无标题时从内容首行提取短句（取第一个句号/逗号前的文字，最多30字）
  */
-export function ensureTitles(notes: AtomicNote[]): AtomicNote[] {
+function ensureTitles(notes: AtomicNote[]): AtomicNote[] {
   for (const note of notes) {
     if (!note.title || note.title.trim() === '') {
       note.title = extractTitleFromContent(note.content);

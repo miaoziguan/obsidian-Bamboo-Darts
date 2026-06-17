@@ -72,7 +72,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
 export class AtomicNotesSettingTab extends PluginSettingTab {
   plugin: AtomicNotesPlugin;
-  icon: string = 'atom';
 
   constructor(app: App, plugin: AtomicNotesPlugin) {
     super(app, plugin);

@@ -3,20 +3,18 @@
  * 将提炼的原子笔记存入 Obsidian 知识库
  */
 
-import { App, TFile, normalizePath } from 'obsidian';
+import { App, normalizePath } from 'obsidian';
 import { AtomicNote } from './utils/notes-standards';
 import { MAX_FILENAME_LENGTH } from './constants';
 
 export interface StorageConfig {
   targetFolder: string; // 目标文件夹（如 "Atomic Notes"）
   fileNameTemplate: string; // 文件名模板（如 "{{title}}" 或 "{{date}}-{{title}}"）
-  overwriteDuplicate: boolean; // 是否覆盖重复笔记
 }
 
 const DEFAULT_CONFIG: StorageConfig = {
   targetFolder: 'Atomic Notes',
   fileNameTemplate: '{{title}}',
-  overwriteDuplicate: false,
 };
 
 /**
@@ -134,25 +132,19 @@ async function saveNote(
     const existingFile = app.vault.getAbstractFileByPath(filePath);
     
     if (existingFile) {
-      if (fullConfig.overwriteDuplicate) {
-        // 覆盖已存在的文件
-        await app.vault.modify(existingFile as TFile, content);
-        return { success: true, path: filePath };
-      } else {
-        // 不覆盖，生成新文件名
-        const baseName = fileName;
-        let counter = 1;
-        let newFilePath: string;
-        
-        do {
-          const newFileName = `${baseName} ${counter}`;
-          newFilePath = normalizePath(`${fullConfig.targetFolder}/${newFileName}.md`);
-          counter++;
-        } while (app.vault.getAbstractFileByPath(newFilePath));
-        
-        await app.vault.create(newFilePath, content);
-        return { success: true, path: newFilePath };
-      }
+      // 生成递增文件名避免覆盖
+      const baseName = fileName;
+      let counter = 1;
+      let newFilePath: string;
+      
+      do {
+        const newFileName = `${baseName} ${counter}`;
+        newFilePath = normalizePath(`${fullConfig.targetFolder}/${newFileName}.md`);
+        counter++;
+      } while (app.vault.getAbstractFileByPath(newFilePath));
+      
+      await app.vault.create(newFilePath, content);
+      return { success: true, path: newFilePath };
     } else {
       // 创建新文件
       await app.vault.create(filePath, content);
