@@ -100,7 +100,7 @@ export async function verifyFacts(
         'Authorization': `Bearer ${config.deepseekApiKey}`,
       },
       body: JSON.stringify({
-        model: config.model || 'deepseek-chat',
+        model: config.model || 'deepseek-v4-flash',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },

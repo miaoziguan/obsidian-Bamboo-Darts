@@ -50,7 +50,7 @@ export interface PluginSettings {
 export const DEFAULT_SETTINGS: PluginSettings = {
   deepseekApiKey: '',
   deepseekApiUrl: 'https://api.deepseek.com/v1/chat/completions',
-  model: 'deepseek-chat',
+  model: 'deepseek-v4-flash',
   maxTokens: 2000,
   targetFolder: 'Atomic Notes',
   fileNameTemplate: '{{title}}',
@@ -126,7 +126,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('模型')
-      .setDesc('使用的模型（默认：deepseek-chat）')
+      .setDesc('使用的模型（默认：deepseek-v4-flash）')
       .addText(text =>
         text
           .setValue(this.plugin.settings.model)

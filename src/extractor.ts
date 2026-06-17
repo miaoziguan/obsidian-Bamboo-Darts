@@ -36,7 +36,7 @@ interface ExtractorConfig {
 const DEFAULT_CONFIG: ExtractorConfig = {
   deepseekApiKey: '',
   deepseekApiUrl: 'https://api.deepseek.com/v1/chat/completions',
-  model: 'deepseek-chat',
+  model: 'deepseek-v4-flash',
   maxTokens: 2000,
   tagPreferences: [],
   tagMode: 'lenient',
