@@ -9,6 +9,7 @@ import { AtomicNotesSettingTab, PluginSettings, DEFAULT_SETTINGS } from './ui/se
 import { runExtraction } from './extractor';
 import { checkAgainstVault } from './deduplicator';
 import { stripImageNoise } from './utils/clipboard';
+import { saveNotes } from './storage';
 import { ResultModal } from './ui/result-modal';
 import { InputModal } from './ui/input-modal';
 import { AtomicNotesPanel, VIEW_TYPE_ATOMIC_PANEL } from './ui/panel-view';
