@@ -184,8 +184,8 @@
   margin-top: 12px;
 }
 
-.atomic-notes-drop-area:hover {
-  border-color: var(--interactive-accent) !important;
+.atomic-notes-panel .atomic-notes-drop-area:hover {
+  border-color: var(--interactive-accent);
   background: var(--background-secondary);
 }
 
