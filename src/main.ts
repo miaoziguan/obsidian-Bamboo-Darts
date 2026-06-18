@@ -10,6 +10,7 @@ import { runExtraction } from './extractor';
 import { checkAgainstVault } from './deduplicator';
 import { stripImageNoise } from './utils/clipboard';
 import { saveNotes } from './storage';
+import { AtomicNote } from './utils/notes-standards';
 import { ResultModal } from './ui/result-modal';
 import { InputModal } from './ui/input-modal';
 import { AtomicNotesPanel, VIEW_TYPE_ATOMIC_PANEL } from './ui/panel-view';
@@ -243,40 +244,9 @@ export default class AtomicNotesPlugin extends Plugin {
       new Notice(`去重完成，将保存 ${dedupResult.uniqueNotes.length} 条笔记`);
 
       // 保存笔记
-      let savedPaths: string[] = [];
-
       if (this.settings.autoSave) {
         new Notice('正在保存到知识库...');
-        try {
-          const saveResult = await saveNotes(
-            this.app,
-            dedupResult.uniqueNotes,
-            {
-              targetFolder: this.settings.targetFolder || 'Atomic Notes',
-              fileNameTemplate: this.settings.fileNameTemplate || '{{title}}',
-            }
-          );
-          savedPaths = saveResult.paths;
-          if (saveResult.failed > 0 && saveResult.errors.length > 0) {
-            new Notice(`保存完成，但 ${saveResult.failed} 条失败：${saveResult.errors.slice(0, 3).join('；')}`);
-          } else {
-            new Notice(`保存完成！成功 ${saveResult.success} 条`);
-          }
-        } catch (saveError) {
-          new Notice(`保存过程出错：${saveError instanceof Error ? saveError.message : String(saveError)}`);
-          console.error('自动保存失败：', saveError);
-        }
-
-        // Bug #6 修复：自动创建反向链接
-        if (this.settings.autoBacklink && input.type === 'selection') {
-          const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (activeView) {
-            const backlinkResult = insertBacklinks(activeView.editor, savedPaths);
-            if (backlinkResult.success > 0) {
-              new Notice(`已插入 ${backlinkResult.success} 条反向链接`);
-            }
-          }
-        }
+        await this.saveAndBacklink(input, dedupResult.uniqueNotes);
       } else {
         // 显示结果弹窗
         new ResultModal(
@@ -284,49 +254,57 @@ export default class AtomicNotesPlugin extends Plugin {
           { ...result, notes: dedupResult.uniqueNotes },
           dedupResult,
           async (notes) => {
-            try {
-              new Notice('正在保存到知识库...');
-              const saveResult = await saveNotes(
-                this.app,
-                notes,
-                {
-                  targetFolder: this.settings.targetFolder || 'Atomic Notes',
-                  fileNameTemplate: this.settings.fileNameTemplate || '{{title}}',
-                }
-              );
-              savedPaths = saveResult.paths;
-              if (saveResult.failed > 0 && saveResult.errors.length > 0) {
-                new Notice(`保存完成，但 ${saveResult.failed} 条失败：${saveResult.errors.slice(0, 3).join('；')}`);
-              } else {
-                new Notice(`保存完成！成功 ${saveResult.success} 条`);
-              }
-
-              // Bug #6 修复：自动创建反向链接
-              if (this.settings.autoBacklink && input.type === 'selection') {
-                const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-                if (activeView) {
-                  const blResult = insertBacklinks(activeView.editor, savedPaths);
-                  if (blResult.success > 0) {
-                    new Notice(`已插入 ${blResult.success} 条反向链接`);
-                  }
-                }
-              }
-
-              // Bug #8 修复：记录提炼历史
-              await this.recordHistory(input, notes.length, savedPaths);
-            } catch (saveError) {
-              new Notice(`保存过程出错：${saveError instanceof Error ? saveError.message : String(saveError)}`);
-              console.error('保存失败：', saveError);
-            }
+            await this.saveAndBacklink(input, notes);
           }
         ).open();
-
-        // 非自动保存模式也需要记录历史（弹窗关闭前记录）
-        await this.recordHistory(input, dedupResult.uniqueNotes.length, savedPaths);
       }
     } catch (error) {
       new Notice(`提炼失败：${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * 保存笔记、插入反向链接、记录提炼历史
+   */
+  private async saveAndBacklink(
+    input: { type: 'url' | 'text' | 'selection'; content: string },
+    notes: AtomicNote[]
+  ) {
+    let savedPaths: string[] = [];
+    try {
+      new Notice('正在保存到知识库...');
+      const saveResult = await saveNotes(
+        this.app,
+        notes,
+        {
+          targetFolder: this.settings.targetFolder || 'Atomic Notes',
+          fileNameTemplate: this.settings.fileNameTemplate || '{{title}}',
+        }
+      );
+      savedPaths = saveResult.paths;
+      if (saveResult.failed > 0 && saveResult.errors.length > 0) {
+        new Notice(`保存完成，但 ${saveResult.failed} 条失败：${saveResult.errors.slice(0, 3).join('；')}`);
+      } else {
+        new Notice(`保存完成！成功 ${saveResult.success} 条`);
+      }
+    } catch (saveError) {
+      new Notice(`保存过程出错：${saveError instanceof Error ? saveError.message : String(saveError)}`);
+      console.error('保存失败：', saveError);
+    }
+
+    // 自动创建反向链接
+    if (this.settings.autoBacklink && input.type === 'selection') {
+      const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (activeView) {
+        const backlinkResult = insertBacklinks(activeView.editor, savedPaths);
+        if (backlinkResult.success > 0) {
+          new Notice(`已插入 ${backlinkResult.success} 条反向链接`);
+        }
+      }
+    }
+
+    // 记录提炼历史
+    await this.recordHistory(input, notes.length, savedPaths);
   }
 
   /**

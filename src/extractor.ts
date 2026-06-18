@@ -208,7 +208,7 @@ async function extractAtomicNotes(
 
     if (validNotes.length === 0 && notes.length > 0) {
       // 有笔记但全部校验失败，记录失败原因
-      const reasons = validationResults.map(item => item.validation.reason).join('; ');
+      const reasons = validationResults.map(item => item.validation.issues.join('; ')).filter(Boolean).join(' | ');
       return { success: false, error: `AI 输出的笔记校验失败: ${reasons}` };
     }
 

@@ -482,7 +482,7 @@ function safeTruncate(text: string, maxLen: number): string {
   const tailPartialWord = candidate.match(/[a-zA-Z]{1,4}$/);
   if (tailPartialWord) {
     // 回退到最后一个安全位置（空格或汉字之后）
-    const lastSafeBoundary = candidate.search(/([\\s\u4e00-\u9fa5])(?=[a-zA-Z]*$)/);
+    const lastSafeBoundary = candidate.search(/([\s\u4e00-\u9fa5])(?=[a-zA-Z]*$)/);
     if (lastSafeBoundary > 3) {
       return candidate.slice(0, lastSafeBoundary + 1).trim();
     }
