@@ -44,3 +44,15 @@ export const MIN_NOTE_CONTENT_LENGTH = 10;
 
 /** 知识库去重并行批次大小 */
 export const DEDUP_BATCH_SIZE = 20;
+
+/** 去重最小关键词门槛——低于此值不判定重复，避免小集合误判 */
+export const DEDUP_MIN_KEYWORDS = 3;
+
+/** 数据核查：单次最大数据点数量 */
+export const MAX_DATA_POINTS_PER_CHECK = 30;
+
+/** 事实核查：单次最大事实数量 */
+export const MAX_FACTS_PER_CHECK = 20;
+
+/** 原文截断阈值 */
+export const ORIGINAL_TEXT_CHUNK_SIZE = 4000;

@@ -253,6 +253,20 @@ function checkDuplicate(
 
 // ─── 相似度计算（保留原逻辑） ───
 
+/**
+ * 字符 bigram Jaccard 相似度
+ *
+ * 【设计意图】
+ * 用于原始文本的质量门控，与 deduplicator.ts 的「关键词 Jaccard」不同：
+ *   - 本函数：对原始输入文本（含噪声），字符级比对，对乱码/噪声鲁棒
+ *   - deduplicator：对提炼后笔记，关键词语义聚焦
+ *
+ * 特点：
+ *   - 长度归一化（lenRatio < 0.5 直接返回 0）避免大小文本误匹配
+ *   - 截断至 1000 字符，减少计算量
+ *   - 字符 bigram 对噪声字符钝感（噪声字符会分散 bigram 权重）
+ */
+
 function calculateSimilarity(str1: string, str2: string): number {
   const s1 = str1.toLowerCase().replace(/\s+/g, '').slice(0, 1000);
   const s2 = str2.toLowerCase().replace(/\s+/g, '').slice(0, 1000);

@@ -13,8 +13,9 @@ import { runGateChecks } from './utils/gate-rules';
 import { parseAINoteOutput, AtomicNote, validateAtomicNote, ensureTags } from './utils/notes-standards';
 import { crossCheckBatch } from './deduplicator';
 import { buildSystemPrompt, buildExtractionPrompt } from './extraction/tag-preferences';
-import { verifyFacts } from './extraction/fact-checker';
+import { verifyFacts, verifyData } from './extraction/fact-checker';
 import { reviewNotes, ReviewConfig } from './review/note-reviewer';
+import { extractUrlContent } from './extraction/url-extractor';
 import { AI_TEMPERATURE } from './constants';
 
 interface ExtractorConfig {
@@ -26,11 +27,12 @@ interface ExtractorConfig {
   tagMode: 'lenient' | 'strict';
   factCheck: boolean;
   verifiedOnly: boolean;
-  // 笔记复查
+  enableDataCheck: boolean;
   enableReview: boolean;
   reviewModel: string;
   reviewApiUrl: string;
   reviewApiKey: string;
+  signal?: AbortSignal;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
@@ -42,6 +44,7 @@ const DEFAULT_CONFIG: ExtractorConfig = {
   tagMode: 'lenient',
   factCheck: false,
   verifiedOnly: false,
+  enableDataCheck: true,
   enableReview: false,
   reviewModel: '',
   reviewApiUrl: '',
@@ -83,13 +86,15 @@ interface ReadResult {
  * Phase 1: 读取内容（URL/文本/文件）
  */
 async function readContent(
-  input: { type: 'url' | 'text' | 'selection'; content: string }
+  input: { type: 'url' | 'text' | 'selection'; content: string },
+  signal?: AbortSignal
 ): Promise<ReadResult> {
   if (input.type === 'url') {
     try {
       const response = await requestUrl({
         url: input.content,
         method: 'GET',
+        signal,
       });
 
       if (!response.text) {
@@ -98,22 +103,13 @@ async function readContent(
 
       const html = response.text;
 
-      // 简单提取正文（去掉 HTML 标签）
-      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-      let content = bodyMatch ? bodyMatch[1] : html;
+      const extractResult = await extractUrlContent(html);
 
-      // 去掉 script/style 标签
-      content = content.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '');
-      // 去掉 HTML 标签
-      content = content.replace(/<[^>]+>/g, ' ');
-      // 清理多余空白
-      content = content.replace(/\s+/g, ' ').trim();
-
-      if (content.length < 100) {
-        return { success: false, error: 'URL 内容过短，可能不是文章内容页面' };
+      if (!extractResult.success) {
+        return { success: false, error: extractResult.error };
       }
 
-      return { success: true, content, type: 'url' };
+      return { success: true, content: extractResult.content, type: 'url' };
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       return { success: false, error: `读取 URL 失败: ${errorMsg}` };
@@ -152,7 +148,6 @@ async function extractAtomicNotes(
     return { success: false, error: '未配置 DeepSeek API Key' };
   }
 
-  // 构建 Prompt（使用标签偏好动态生成 system prompt）
   const systemPrompt = buildSystemPrompt(fullConfig.tagPreferences, fullConfig.tagMode);
   const userPrompt = buildExtractionPrompt(content);
 
@@ -179,6 +174,7 @@ async function extractAtomicNotes(
         max_tokens: fullConfig.maxTokens,
         temperature: AI_TEMPERATURE,
       }),
+      signal: fullConfig.signal,
     });
 
     const aiContent = response.json?.choices?.[0]?.message?.content;
@@ -190,9 +186,13 @@ async function extractAtomicNotes(
 
     // 如果 strict 解析出 0 条，尝试宽松模式（带 ensureTitles）
     if (notes.length === 0) {
+      console.warn('[提炼] 严格模式解析失败，尝试宽松模式降级...');
       const fallbackNotes = parseAINoteOutput(aiContent, true);
       if (fallbackNotes.length > 0) {
+        console.warn(`[提炼] 宽松模式成功解析 ${fallbackNotes.length} 条笔记（可能包含质量较低的标题）`);
         notes.push(...fallbackNotes);
+      } else {
+        console.warn('[提炼] 宽松模式也失败，AI 输出可能格式异常');
       }
     }
 
@@ -234,6 +234,7 @@ export interface ExtractionResult {
   steps: Step[];
   error?: string;
   factCheckSummary?: { verified: number; doubtful: number; unverified: number };
+  dataCheckSummary?: { consistent: number; deviation: number; unverifiable: number };
 }
 
 export async function runExtraction(
@@ -248,7 +249,7 @@ export async function runExtraction(
 
   // Phase 1: 读取内容
   addStep(steps, 'Phase 1: 读取内容', 'success', '开始读取...');
-  const readResult = await readContent(input);
+  const readResult = await readContent(input, fullConfig.signal);
 
   if (!readResult.success) {
     updateLastStep(steps, 'failed', readResult.error || '读取失败');
@@ -270,7 +271,6 @@ export async function runExtraction(
 
   if (gateResult.warnings.length > 0) {
     updateLastStep(steps, 'success', `通过（${gateResult.warnings.length} 条提醒）`);
-    // 警告信息存入 message detail
     const lastStep = steps[steps.length - 1];
     lastStep.message += '\n' + gateResult.warnings.join('\n');
   } else {
@@ -309,6 +309,7 @@ export async function runExtraction(
       deepseekApiUrl: fullConfig.deepseekApiUrl,
       model: fullConfig.model,
       maxTokens: fullConfig.maxTokens,
+      signal: fullConfig.signal,
     });
 
     factCheckSummary = { verified: factResult.verified, doubtful: factResult.doubtful, unverified: factResult.unverified };
@@ -320,12 +321,11 @@ export async function runExtraction(
         `${notes.length} 条笔记中：有据 ${factResult.verified} 条，存疑 ${factResult.doubtful} 条，无据 ${factResult.unverified} 条`
       );
 
-      // 如果启用了"仅保存已核实笔记"，过滤掉无据笔记
       if (fullConfig.verifiedOnly) {
         const originalCount = notes.length;
         notes = notes.filter(note => {
-          const v = (note as any).verification as Array<{ status: string }> | undefined;
-          if (!v || v.length === 0) return true; // 无事实声明，保留
+          const v = note.verification;
+          if (!v || v.length === 0) return true;
           return !v.some(r => r.status === '无据');
         });
         updateLastStep(steps, 'success',
@@ -335,6 +335,31 @@ export async function runExtraction(
     }
   } else {
     addStep(steps, 'Phase 5: 事实核查', 'skipped', '未启用，跳过');
+  }
+
+  // Phase 5b: 数据核查（可选）
+  let dataCheckSummary: { consistent: number; deviation: number; unverifiable: number } | undefined;
+
+  if (fullConfig.enableDataCheck) {
+    addStep(steps, 'Phase 5b: 数据核查', 'success', '正在核查数据准确性...');
+    const dataResult = await verifyData(content, notes, {
+      deepseekApiKey: fullConfig.deepseekApiKey,
+      deepseekApiUrl: fullConfig.deepseekApiUrl,
+      model: fullConfig.model,
+      signal: fullConfig.signal,
+    });
+
+    dataCheckSummary = { consistent: dataResult.consistent, deviation: dataResult.deviation, unverifiable: dataResult.unverifiable };
+
+    if (dataResult.error) {
+      updateLastStep(steps, 'failed', `数据核查出错: ${dataResult.error}`);
+    } else {
+      updateLastStep(steps, 'success',
+        `数据点核查：一致 ${dataResult.consistent} 个，偏差 ${dataResult.deviation} 个，无法验证 ${dataResult.unverifiable} 个`
+      );
+    }
+  } else {
+    addStep(steps, 'Phase 5b: 数据核查', 'skipped', '未启用，跳过');
   }
 
   // Phase 6: 笔记复查（可选）
@@ -347,6 +372,7 @@ export async function runExtraction(
       deepseekApiUrl: fullConfig.reviewApiUrl || fullConfig.deepseekApiUrl,
       model: fullConfig.reviewModel || fullConfig.model,
       maxTokens: fullConfig.maxTokens,
+      signal: fullConfig.signal,
     };
 
     const reviewResult = await reviewNotes(notes, reviewConfig);
@@ -371,5 +397,5 @@ export async function runExtraction(
     addStep(steps, 'Phase 6: 笔记复查', 'skipped', '未启用，跳过');
   }
 
-  return { success: true, notes, steps, factCheckSummary };
+  return { success: true, notes, steps, factCheckSummary, dataCheckSummary };
 }

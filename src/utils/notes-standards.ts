@@ -5,13 +5,72 @@
 
 import { MIN_NOTE_CONTENT_LENGTH } from '../constants';
 
+export interface VerificationItem {
+  index: number;
+  status: '有据' | '存疑' | '无据';
+  reason?: string;
+  noteIndex?: number;
+}
+
+export type DataCheckStatus = '一致' | '偏差' | '无法验证';
+
+export interface DataCheckItem {
+  /** 笔记中提取到的数据点 */
+  claim: string;
+  /** 原文中对应的数据（如果找到） */
+  original?: string;
+  /** 核查状态 */
+  status: DataCheckStatus;
+  /** 说明 */
+  reason?: string;
+}
+
 export interface AtomicNote {
   title: string;
   content: string;
   source?: string;
   tags?: string[];
   createdAt: string;
+  verification?: VerificationItem[];
+  verifiedCount?: number;
+  doubtfulCount?: number;
+  unverifiedCount?: number;
+  dataCheck?: DataCheckItem[];
+  dataConsistentCount?: number;
+  dataDeviationCount?: number;
+  dataUnverifiableCount?: number;
 }
+
+/** 预编译的正则表达式（优化性能，避免重复编译） */
+
+// 核心概念列表（用于提取"xxx的yyy"中的关键概念）
+const CORE_CONCEPTS = [
+  '保护', '假设', '矛盾', '影响', '效应', '机制', '策略', '方法',
+  '思维', '模式', '偏见', '误区', '功能', '限制', '优势', '劣势',
+  '特点', '特征', '原理', '原则', '标准', '规范', '问题', '挑战',
+  '风险', '机遇', '变化', '趋势', '后果', '意义', '价值',
+  'Check', 'Effect', 'War', 'API', 'AI', 'ML', 'UX', 'UI', 'SDK'
+];
+
+// 提取"xxx的yyy"中的核心概念的动态正则
+const POSSESSIVE_PATTERN = new RegExp(
+  `^(.{0,6})?(.+?(?:${CORE_CONCEPTS.join('|')}))(.{0,8})?$`
+);
+
+// 安全截断相关正则
+const TAIL_PARTIAL_WORD_RE = /[a-zA-Z]{1,4}$/;
+const SAFE_BOUNDARY_RE = /([\s\u4e00-\u9fa5])(?=[a-zA-Z]*$)/;
+const WEAK_ENDING_RE = /(?:的|如|和|与|或|对|在|被|将|把|了|着|吗|呢|啊|吧|么|[a-zA-Z]{1,2})$/;
+
+// 标题质量检测相关
+const KNOWN_TERMS = [
+  'AI', 'ML', 'UX', 'UI', 'API', 'SDK', 'OS', 'CPU', 'GPU',
+  'RAM', 'IO', 'ID', 'OK', 'TV', 'PC', 'HR', 'PR', 'PM', 'QA',
+  'App', 'Web', 'Mac', 'iOS', 'Android', 'Check', 'Effect',
+  'War', 'Note', 'Data', 'Code', 'Node', 'Git', 'HTTP', 'JSON'
+];
+const SENTENCE_FRAGMENTS = ['的如', '认为', '发现', '指出', '显示', '表明', '通过', '以及'];
+const TITLE_SUFFIX_RE = /(的研究|的发现|的分析|的影响|的问题|的方法|的策略|的机制|的效果|的报告|的调查)$/gi;
 
 /**
  * 校验原子笔记是否符合标准
@@ -359,12 +418,8 @@ function tryParseListFormat(text: string): AtomicNote[] {
 
 /**
  * 清理标题：去掉编号前缀、多余空格、Markdown 加粗标记
- * 处理 "1. xxx" / "1、xxx" / "**xxx**" / "### xxx" 等格式
- *
- * 子弹笔记标题规范：5~25字的简洁短语，独立成意
- * 如果清理后超过25字，自动缩短为子弹笔记风格
  */
-function cleanTitle(raw: string): string {
+export function cleanTitle(raw: string): string {
   let cleaned = raw.trim();
   // 去掉编号前缀: "1. " "1、" "①" "(1)" "（1）"
   cleaned = cleaned.replace(/^(?:\d+[\.\、]\s*|[\[【\(（]?\d+[\]】\)）]\s*|^[①②③④⑤⑥⑦⑧⑨⑩]\s*)/, '');
@@ -375,22 +430,13 @@ function cleanTitle(raw: string): string {
   // 去掉首尾空白和标点
   cleaned = cleaned.replace(/^[：:\s,，]+|[：:\s,，]+$/g, '');
 
-  // 如果清理后为空或太短（<2字），返回空让上层兜底
   if (cleaned.length < 2) return '';
 
-  // ★ 子弹标题长度控制：超过20字时智能缩短
   if (cleaned.length > 20) {
     const shortened = shortenToBulletTitle(cleaned);
-    // ★ 安全验证：如果缩短结果质量不合格，返回空让上层用内容提取代替
     if (isQualityTitle(shortened)) {
       return shortened;
     }
-    // 缩短失败了——返回空字符串，让 ensureTitles 从内容中提取更好的标题
-    return '';
-  }
-
-  // 即使长度合格也要做质量检查（防止截断残留等）
-  if (!isQualityTitle(cleaned)) {
     return '';
   }
 
@@ -422,19 +468,8 @@ function shortenToBulletTitle(longTitle: string): string {
     return longTitle.slice(0, commaIdx).trim();
   }
 
-  // 策略 3: 提取"xxx的yyy"中的核心概念（扩展关键词库）
-  // 例如 "央视的版权保护隐含一个错误假设" → "版权保护的错误假设"
-  const coreConcepts = [
-    '保护', '假设', '矛盾', '影响', '效应', '机制', '策略', '方法',
-    '思维', '模式', '偏见', '误区', '功能', '限制', '优势', '劣势',
-    '特点', '特征', '原理', '原则', '标准', '规范', '问题', '挑战',
-    '风险', '机遇', '变化', '趋势', '后果', '意义', '价值',
-    'Check', 'Effect', 'War', 'API', 'AI', 'ML', 'UX', 'UI', 'SDK'
-  ];
-  const possessivePattern = new RegExp(
-    `^(.{0,6})?(.+?(?:${coreConcepts.join('|')}))(.{0,8})?$`
-  );
-  const possessiveMatch = longTitle.match(possessivePattern);
+  // 策略 3: 提取"xxx的yyy"中的核心概念
+  const possessiveMatch = longTitle.match(POSSESSIVE_PATTERN);
   if (possessiveMatch && possessiveMatch[2]) {
     const core = possessiveMatch[2].trim();
     const modifier = possessiveMatch[1]?.trim() || '';
@@ -479,10 +514,10 @@ function safeTruncate(text: string, maxLen: number): string {
   const candidate = text.slice(0, maxLen);
 
   // 检查末尾是否在英文单词中间切断（最后几个字符是半截英文单词）
-  const tailPartialWord = candidate.match(/[a-zA-Z]{1,4}$/);
+  const tailPartialWord = candidate.match(TAIL_PARTIAL_WORD_RE);
   if (tailPartialWord) {
     // 回退到最后一个安全位置（空格或汉字之后）
-    const lastSafeBoundary = candidate.search(/([\s\u4e00-\u9fa5])(?=[a-zA-Z]*$)/);
+    const lastSafeBoundary = candidate.search(SAFE_BOUNDARY_RE);
     if (lastSafeBoundary > 3) {
       return candidate.slice(0, lastSafeBoundary + 1).trim();
     }
@@ -493,7 +528,7 @@ function safeTruncate(text: string, maxLen: number): string {
   // 在安全位置截断后清理末尾
   let result = candidate.trim();
   // 去掉末尾弱结尾（介词/连词/助词）
-  result = result.replace(/(?:的|如|和|与|或|对|在|被|将|把|了|着|吗|呢|啊|吧|么|[a-zA-Z]{1,2})$/, '');
+  result = result.replace(WEAK_ENDING_RE, '');
 
   // 最终保底：确保至少返回有意义的片段
   if (result.length < 4) {
@@ -602,22 +637,15 @@ function isQualityTitle(title: string): boolean {
 
   if (hasChinese && tailEnglish) {
     const tail = tailEnglish[0];
-    // 末尾英文 ≤4 字符且不在已知完整术语白名单中 → 判定为截断残留
-    const knownTerms = [
-      'AI', 'ML', 'UX', 'UI', 'API', 'SDK', 'OS', 'CPU', 'GPU',
-      'RAM', 'IO', 'ID', 'OK', 'TV', 'PC', 'HR', 'PR', 'PM', 'QA',
-      'App', 'Web', 'Mac', 'iOS', 'Android', 'Check', 'Effect',
-      'War', 'Note', 'Data', 'Code', 'Node', 'Git', 'HTTP', 'JSON'
-    ];
-    if (tail.length <= 5 && !knownTerms.some(known => tail === known || tail.endsWith(known))) {
+    // 末尾英文 ≤5 字符且不在已知完整术语白名单中 → 判定为截断残留
+    if (tail.length <= 5 && !KNOWN_TERMS.some(known => tail === known || tail.endsWith(known))) {
       return false;
     }
   }
 
   // 检查是否像句子片段（包含"的如""认为""发现"等动词性短语且较长）
   // 这种通常是长句被粗暴截断的结果
-  const sentenceFragments = ['的如', '认为', '发现', '指出', '显示', '表明', '通过', '以及'];
-  for (const frag of sentenceFragments) {
+  for (const frag of SENTENCE_FRAGMENTS) {
     if (t.includes(frag) && t.length > 12) {
       return false;
     }
@@ -665,7 +693,7 @@ function extractKeywords(content: string, title?: string): string[] {
   if (title && isQualityTitle(title)) {
     // 去掉常见的无信息量后缀
     const coreTitle = title
-      .replace(/(的研究|的发现|的分析|的影响|的问题|的方法|的策略|的机制|的效果|的报告|的调查)$/gi, '')
+      .replace(TITLE_SUFFIX_RE, '')
       .trim();
     if (coreTitle.length >= 2 && coreTitle.length <= 20) {
       keywords.add(coreTitle);

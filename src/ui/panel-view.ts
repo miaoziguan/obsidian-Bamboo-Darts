@@ -8,6 +8,7 @@ import {
   WorkspaceLeaf,
   Notice,
 } from 'obsidian';
+import AtomicNotesPlugin from '../main';
 import { buildSimilarityMatrix, NoteMeta } from '../discovery/similarity-matrix';
 import { extractKeywords } from '../discovery/keywords';
 import { ExtractionHistoryEntry } from '../services/history-service';
@@ -16,9 +17,9 @@ import { stripImageNoise } from '../utils/clipboard';
 export const VIEW_TYPE_ATOMIC_PANEL = 'atomic-notes-panel';
 
 export class AtomicNotesPanel extends ItemView {
-  private plugin: any; // AtomicNotesPlugin reference
+  private plugin: AtomicNotesPlugin;
 
-  constructor(leaf: WorkspaceLeaf, plugin: any) {
+  constructor(leaf: WorkspaceLeaf, plugin: AtomicNotesPlugin) {
     super(leaf);
     this.plugin = plugin;
   }
@@ -39,43 +40,6 @@ export class AtomicNotesPanel extends ItemView {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass('atomic-notes-panel');
-
-    // ─── CSS Styles ───
-    const styleEl = container.createEl('style');
-    styleEl.textContent = `
-      .atomic-notes-panel{padding:0 12px 12px}
-      .atomic-notes-panel .setting-item{border-top:none;padding:8px 0}
-      .atomic-notes-tabs{display:flex;margin-bottom:12px;border-bottom:2px solid var(--background-modifier-border)}
-      .atomic-notes-tab{padding:8px 16px;cursor:pointer;font-size:13px;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .2s,border-color .2s}
-      .atomic-notes-tab:hover{color:var(--text-normal)}
-      .atomic-notes-tab.active{color:var(--text-accent);border-bottom-color:var(--text-accent);font-weight:600}
-      .atomic-notes-tab-content{display:none}
-      .atomic-notes-tab-content.active{display:block}
-      .atomic-notes-textarea{width:100%;min-height:180px;resize:vertical;font-family:var(--font-text);font-size:13px;padding:8px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary);color:var(--text-normal);box-sizing:border-box}
-      .atomic-notes-url-input{width:100%;padding:8px;font-size:13px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary);color:var(--text-normal);box-sizing:border-box}
-      /* 底部信息栏：字数 + 快捷按钮 */
-      .atomic-notes-meta-row{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
-      .atomic-notes-char-count{font-size:11px;color:var(--text-faint)}
-      .atomic-notes-clear-link{font-size:11px;color:var(--text-muted);cursor:pointer;background:none;border:none;padding:0;text-decoration:none}
-      .atomic-notes-clear-link:hover{color:var(--text-error)}
-      .atomic-notes-clip-btn{font-size:11px;color:var(--text-accent);cursor:pointer;background:none;border:none;padding:0 4px;text-decoration:none}
-      .atomic-notes-clip-btn:hover{color:var(--text-accent-hover)}
-      /* 按钮栏 */
-      .atomic-notes-btn-wrap{margin-top:12px}
-      .atomic-notes-drop-area:hover{border-color:var(--interactive-accent)!important;background:var(--background-secondary)}
-      .atomic-notes-drop-zone{min-height:150px}
-      /* 发现页面 — 卡片容器 */
-      .atomic-notes-discovery-card{background:var(--background-secondary);border-radius:8px;padding:10px 12px;margin-bottom:12px}
-      .atomic-notes-discovery-card h4{margin:0 0 6px;font-size:13px;font-weight:600}
-      .atomic-notes-discovery-card .note-link-row{display:flex;align-items:center;gap:6px;padding:4px 6px;margin:2px 0;border-radius:4px;cursor:pointer;transition:background .15s}
-      .atomic-notes-discovery-card .note-link-row:hover{background:var(--background-modifier-hover)}
-      .atomic-notes-discovery-card .sim-badge{font-size:10px;padding:1px 6px;border-radius:10px;flex-shrink:0}
-      .atomic-notes-discovery-card .sim-badge.high{background:var(--color-green);color:#fff}
-      .atomic-notes-discovery-card .sim-badge.mid{background:var(--color-orange);color:#fff}
-      .atomic-notes-discovery-card .tag-chip{display:inline-block;font-size:10px;padding:1px 6px;border-radius:10px;background:var(--background-modifier-border);color:var(--text-muted);margin-right:4px}
-      /* 介绍页面 */
-      .atomic-notes-about-section{font-size:14px;font-weight:700;color:var(--text-normal);padding-bottom:4px;border-bottom:1px solid var(--background-modifier-border);margin:16px 0 8px}
-    `;
 
     // 标题
     container.createEl('h3', { text: '原子笔记提炼' });
@@ -344,7 +308,8 @@ export class AtomicNotesPanel extends ItemView {
         ['Phase 2', '质量门控', '5 层规则前置过滤低质/噪声内容，硬拦+软警告'],
         ['Phase 3', 'AI 提炼', '调用 DeepSeek 将内容拆解为原子笔记'],
         ['Phase 4', '同批去重', '检测同批次中高度相似的笔记并合并'],
-        ['Phase 5', '事实核查', '逐条比对原文，标记有据/存疑/无据'],
+        ['Phase 5', '事实核查', '逐条比对原文，标记有据/存疑/无据，支持长文分段'],
+        ['Phase 5b', '数据核查', '检查数字/百分比/日期等数据准确性，内部比对+外部验证'],
         ['Phase 6', '笔记复查', 'AI 二次评分，过滤低价值笔记'],
       ];
       for (const [phase, name, desc] of phases) {
@@ -377,6 +342,52 @@ export class AtomicNotesPanel extends ItemView {
         text: '硬阻断的规则命中后直接拒绝提交流程；软警告仅提醒用户，不影响继续提炼。',
         attr: { style: textStyle + ';margin-top:8px' },
       });
+
+      // ── 事实核查 ──
+      el.createEl('div', { text: '事实核查', attr: { style: sectionStyle } });
+      el.createEl('p', {
+        text: '从每条笔记中提取包含数字、百分比、日期、实体名称的事实声明，逐条与原文比对：',
+        attr: { style: textStyle },
+      });
+      const factStatus = [
+        ['有据', '声明与原文完全一致或可直接推导'],
+        ['存疑', '部分相关但存在夸大、跳跃或无法验证'],
+        ['无据', '无法找到任何支持'],
+      ];
+      for (const [status, desc] of factStatus) {
+        const row = el.createEl('div', { attr: { style: 'display:flex;gap:8px;padding:2px 0 2px 12px' } });
+        row.createEl('span', { text: status, attr: { style: 'font-size:12px;font-weight:600;min-width:48px;color:var(--text-accent)' } });
+        row.createEl('span', { text: desc, attr: { style: 'font-size:11px;color:var(--text-muted)' } });
+      }
+      el.createEl('p', {
+        text: '对于长文章（超过 4000 字符），插件会自动分段核查，确保每个段落的事实都能被准确验证。',
+        attr: { style: textStyle + ';margin-top:6px' },
+      });
+
+      // ── 数据核查 ──
+      el.createEl('div', { text: '数据核查', attr: { style: sectionStyle } });
+      el.createEl('p', {
+        text: '专门检查笔记中的数字、百分比、日期、金额、排名等数据点：',
+        attr: { style: textStyle },
+      });
+      el.createEl('div', {
+        text: '1. 内部验证：与原文精确或模糊比对，检测数据偏差',
+        attr: { style: textStyle },
+      });
+      el.createEl('div', {
+        text: '2. 外部验证：无法在原文中比对的数据点，调用 AI 验证公开事实',
+        attr: { style: textStyle },
+      });
+      const dataStatus = [
+        ['一致', '数据与原文相符'],
+        ['偏差', '数据与原文存在差异'],
+        ['无法验证', '无法在原文或公开知识中找到依据'],
+      ];
+      for (const [status, desc] of dataStatus) {
+        const row = el.createEl('div', { attr: { style: 'display:flex;gap:8px;padding:2px 0 2px 12px' } });
+        row.createEl('span', { text: status, attr: { style: 'font-size:12px;font-weight:600;min-width:64px;color:var(--text-accent)' } });
+        row.createEl('span', { text: desc, attr: { style: 'font-size:11px;color:var(--text-muted)' } });
+      }
 
       // ── 复查机制 ──
       el.createEl('div', { text: '复查机制', attr: { style: sectionStyle } });
@@ -443,6 +454,13 @@ export class AtomicNotesPanel extends ItemView {
     }
 
     const extractBtn = buttonWrap.createEl('button', { text: '开始提炼', cls: 'mod-cta' });
+    const cancelBtn = buttonWrap.createEl('button', { text: '取消', cls: 'mod-warning' });
+    cancelBtn.style.display = 'none';
+    cancelBtn.style.marginLeft = '8px';
+    cancelBtn.addEventListener('click', () => {
+      this.plugin.cancelExtraction();
+    });
+
     extractBtn.addEventListener('click', async () => {
       if (this.plugin._isExtracting) return;
 
@@ -468,6 +486,7 @@ export class AtomicNotesPanel extends ItemView {
       this.plugin._isExtracting = true;
       extractBtn.setText('提炼中...');
       extractBtn.disabled = true;
+      cancelBtn.style.display = '';
 
       try {
         await this.plugin.runExtraction(inputData);
@@ -475,6 +494,7 @@ export class AtomicNotesPanel extends ItemView {
         this.plugin._isExtracting = false;
         extractBtn.setText('开始提炼');
         extractBtn.disabled = false;
+        cancelBtn.style.display = 'none';
 
         if (inputSubMode === 'text') {
           textarea.value = '';
@@ -623,6 +643,7 @@ export class AtomicNotesPanel extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    // No cleanup needed
+    const container = this.containerEl.children[1] as HTMLElement;
+    container.empty();
   }
 }

@@ -47,35 +47,6 @@ export class ResultModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
 
-    // 注入 CSS
-    const styleEl = contentEl.createEl('style');
-    styleEl.textContent = `
-      /* 分区标题 */
-      .atomic-notes-section-header{font-size:13px;font-weight:700;color:var(--text-normal);margin:16px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--background-modifier-border)}
-      /* 步骤时间线 */
-      .atomic-notes-timeline{position:relative;padding-left:24px;margin:4px 0}
-      .atomic-notes-timeline-item{position:relative;margin-bottom:6px;padding:8px 10px;border-radius:6px;background:var(--background-secondary)}
-      .atomic-notes-timeline-item:last-child{margin-bottom:0}
-      .atomic-notes-timeline-dot{position:absolute;left:-20px;top:12px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:bold;line-height:1}
-      .atomic-notes-timeline-step{font-size:12px;font-weight:600;color:var(--text-normal);margin-bottom:2px}
-      .atomic-notes-timeline-message{font-size:11px;color:var(--text-muted)}
-      /* 笔记卡片 */
-      .atomic-notes-card{background:var(--background-secondary);border-radius:8px;padding:10px 12px;margin:8px 0;border:1px solid var(--background-modifier-border)}
-      .atomic-notes-card-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-      .atomic-notes-card-header input[type="checkbox"]{flex-shrink:0;cursor:pointer}
-      .atomic-notes-card-title{font-size:14px;font-weight:600;color:var(--text-normal);flex:1}
-      .atomic-notes-card-preview{font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:6px}
-      .atomic-notes-card-footer{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-      .atomic-notes-tag-chip{font-size:10px;padding:1px 8px;border-radius:10px;background:var(--background-modifier-border);color:var(--text-muted)}
-      .atomic-notes-verify-chip{font-size:10px;padding:1px 8px;border-radius:10px;color:#fff}
-      .atomic-notes-verify-chip.verified{background:var(--color-green)}
-      .atomic-notes-verify-chip.doubtful{background:var(--color-orange)}
-      .atomic-notes-verify-chip.unverified{background:var(--color-red)}
-      /* 按钮栏 */
-      .atomic-notes-action-bar{display:flex;gap:8px;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--background-modifier-border)}
-      .atomic-notes-action-bar .mod-cta{flex:1}
-    `;
-
     // 默认全选
     this.selectedNotes = new Set(this.result.notes.map((_, i) => i));
 
@@ -94,6 +65,11 @@ export class ResultModal extends Modal {
       // 事实核查摘要
       if (this.result.factCheckSummary) {
         this.renderFactCheckSummary(contentEl);
+      }
+
+      // 数据核查摘要
+      if (this.result.dataCheckSummary) {
+        this.renderDataCheckSummary(contentEl);
       }
 
       // 笔记列表
@@ -198,6 +174,34 @@ export class ResultModal extends Modal {
     });
   }
 
+  private renderDataCheckSummary(container: HTMLElement) {
+    const summary = this.result.dataCheckSummary;
+    if (!summary) return;
+
+    const el = container.createEl('div');
+    el.createEl('div', { text: '数据核查摘要', cls: 'atomic-notes-section-header' });
+
+    const total = summary.consistent + summary.deviation + summary.unverifiable;
+    if (total === 0) {
+      el.createEl('p', { text: '未发现数据点', attr: { style: 'color:var(--text-muted)' } });
+      return;
+    }
+
+    const row = el.createEl('div', { attr: { style: 'display:flex;gap:12px;align-items:center' } });
+    row.createEl('span', {
+      text: `数据一致 ${summary.consistent}`,
+      cls: 'atomic-notes-verify-chip verified',
+    });
+    row.createEl('span', {
+      text: `数据偏差 ${summary.deviation}`,
+      cls: 'atomic-notes-verify-chip doubtful',
+    });
+    row.createEl('span', {
+      text: `无法验证 ${summary.unverifiable}`,
+      cls: 'atomic-notes-verify-chip unverified',
+    });
+  }
+
   /** 卡片式笔记列表 */
   private renderNotes(container: HTMLElement) {
     const notesEl = container.createEl('div');
@@ -226,7 +230,7 @@ export class ResultModal extends Modal {
     });
 
     for (let i = 0; i < this.result.notes.length; i++) {
-      const note = this.result.notes[i] as any;
+      const note = this.result.notes[i];
       const card = notesEl.createEl('div', { cls: 'atomic-notes-card' });
 
       // ── 标题行：复选框 + 标题 + 核查徽标 ──
@@ -255,6 +259,15 @@ export class ResultModal extends Modal {
           headerRow.createEl('span', { cls: 'atomic-notes-verify-chip doubtful', text: '存疑' });
         } else {
           headerRow.createEl('span', { cls: 'atomic-notes-verify-chip verified', text: '已核实' });
+        }
+      }
+
+      // 数据核查 chip
+      if (note.dataCheck && note.dataCheck.length > 0) {
+        if ((note.dataDeviationCount ?? 0) > 0) {
+          headerRow.createEl('span', { cls: 'atomic-notes-data-chip deviation', text: '数据偏差' });
+        } else {
+          headerRow.createEl('span', { cls: 'atomic-notes-data-chip consistent', text: '数据一致' });
         }
       }
 

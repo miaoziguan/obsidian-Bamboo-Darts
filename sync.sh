@@ -87,11 +87,11 @@ if [ ! -d "$PLUGIN_DEST" ]; then
   info "已创建插件目录: $PLUGIN_DEST"
 fi
 
-# ─── 同步文件 ───
+# 必需文件（缺失则警告并跳过）
 SYNCED=0
 SKIPPED=0
 
-# 必须同步的文件
+# 必需文件
 for file in main.js manifest.json styles.css; do
   if [ -f "$PROJECT_DIR/$file" ]; then
     cp "$PROJECT_DIR/$file" "$PLUGIN_DEST/$file"
@@ -99,6 +99,14 @@ for file in main.js manifest.json styles.css; do
   else
     warn "跳过 $file（文件不存在）"
     SKIPPED=$((SKIPPED + 1))
+  fi
+done
+
+# 可选元数据文件（README/CHANGELOG/package.json/LICENSE），缺失则静默跳过
+for file in README.md CHANGELOG.md package.json LICENSE; do
+  if [ -f "$PROJECT_DIR/$file" ]; then
+    cp "$PROJECT_DIR/$file" "$PLUGIN_DEST/$file"
+    SYNCED=$((SYNCED + 1))
   fi
 done
 

@@ -159,7 +159,11 @@ async function saveNote(
 }
 
 /**
- * 批量存储原子笔记
+ * 批量存储原子笔记（优化版）
+ * 
+ * 优化策略：
+ * - 预检查目标文件夹中已存在的文件列表
+ * - 避免每条笔记单独检查文件存在性
  */
 export async function saveNotes(
   app: App,
@@ -177,20 +181,68 @@ export async function saveNotes(
     paths: [] as string[],
     errors: [] as string[],
   };
-  
-  for (const note of notes) {
-    const saveResult = await saveNote(app, note, config);
-    
-    if (saveResult.success && saveResult.path) {
-      result.success++;
-      result.paths.push(saveResult.path);
-    } else {
-      result.failed++;
-      if (saveResult.error) {
-        result.errors.push(saveResult.error);
+
+  const fullConfig = { ...DEFAULT_CONFIG, ...config };
+
+  // 兜底：targetFolder 为空时使用默认值
+  if (!fullConfig.targetFolder?.trim()) {
+    fullConfig.targetFolder = DEFAULT_CONFIG.targetFolder;
+  }
+
+  try {
+    // 确保目标文件夹存在
+    await ensureFolder(app, fullConfig.targetFolder);
+
+    // 预获取目标文件夹中已存在的文件列表（优化：一次性获取）
+    const existingFiles = app.vault.getMarkdownFiles();
+    const existingPaths = new Set(
+      existingFiles
+        .filter(f => f.path.startsWith(fullConfig.targetFolder))
+        .map(f => f.path)
+    );
+
+    // 批量生成文件名和内容
+    for (const note of notes) {
+      try {
+        const fileName = generateFileName(fullConfig.fileNameTemplate, note);
+        let filePath = normalizePath(`${fullConfig.targetFolder}/${fileName}.md`);
+        const content = formatNoteAsMarkdown(note);
+
+        // 检查文件是否已存在（使用预获取的集合）
+        if (existingPaths.has(filePath)) {
+          // 生成递增文件名避免覆盖
+          const baseName = fileName;
+          let counter = 1;
+
+          do {
+            const newFileName = `${baseName} ${counter}`;
+            filePath = normalizePath(`${fullConfig.targetFolder}/${newFileName}.md`);
+            counter++;
+          } while (existingPaths.has(filePath));
+
+          // 将新路径加入集合，避免后续笔记重复
+          existingPaths.add(filePath);
+        }
+
+        await app.vault.create(filePath, content);
+        result.success++;
+        result.paths.push(filePath);
+        // 将新路径加入集合
+        existingPaths.add(filePath);
+      } catch (error: unknown) {
+        result.failed++;
+        if (error instanceof Error) {
+          result.errors.push(error.message);
+        } else {
+          result.errors.push(String(error));
+        }
       }
     }
+  } catch (error: unknown) {
+    // 文件夹创建失败
+    result.failed = notes.length;
+    result.errors.push(error instanceof Error ? error.message : String(error));
   }
-  
+
   return result;
 }

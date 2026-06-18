@@ -19,7 +19,8 @@ import { insertBacklinks } from './services/backlink-service';
 
 export default class AtomicNotesPlugin extends Plugin {
   settings: PluginSettings;
-  _isExtracting: boolean = false; // Bug #2 修复：显式声明属性
+  _isExtracting: boolean = false;
+  private _abortController: AbortController | null = null;
 
   async onload() {
     console.log('Bamboo Darts 插件加载中...');
@@ -183,19 +184,16 @@ export default class AtomicNotesPlugin extends Plugin {
 
   /**
    * 运行提炼流程（public，供面板视图调用）
-   * Bug #3 修复：从 private 改为 public
    */
   async runExtraction(input: {
     type: 'url' | 'text' | 'selection';
     content: string;
   }) {
-    // 检查 API Key
     if (!this.settings.deepseekApiKey) {
       new Notice('请先在设置中填写 DeepSeek API Key');
       return;
     }
 
-    // 检查是否已经提炼过相同内容
     const sourceHash = computeSourceHash(input.content);
     const previous = findPreviousExtraction(this.settings.extractionHistory || [], sourceHash);
     if (previous) {
@@ -204,10 +202,10 @@ export default class AtomicNotesPlugin extends Plugin {
       new Notice(`此内容已在${timeStr}提炼过（${previous.noteCount}条笔记），如需重新提炼请继续等待`);
     }
 
+    this._abortController = new AbortController();
     new Notice('正在提炼原子笔记...');
 
     try {
-      // Phase 1-6: 提炼（Bug #16 修复：传递完整配置）
       const result = await runExtraction(
         input,
         {
@@ -219,10 +217,12 @@ export default class AtomicNotesPlugin extends Plugin {
           tagMode: this.settings.tagMode,
           factCheck: this.settings.factCheck,
           verifiedOnly: this.settings.verifiedOnly,
+          enableDataCheck: this.settings.enableDataCheck,
           enableReview: this.settings.enableReview,
           reviewModel: this.settings.reviewModel,
           reviewApiUrl: this.settings.reviewApiUrl,
           reviewApiKey: this.settings.reviewApiKey,
+          signal: this._abortController.signal,
         }
       );
 
@@ -233,7 +233,6 @@ export default class AtomicNotesPlugin extends Plugin {
 
       new Notice(`提炼完成，共 ${result.notes.length} 条原子笔记`);
 
-      // 知识库去重
       new Notice('正在与知识库比对去重...');
       const dedupResult = await checkAgainstVault(
         this.app.vault,
@@ -243,12 +242,10 @@ export default class AtomicNotesPlugin extends Plugin {
 
       new Notice(`去重完成，将保存 ${dedupResult.uniqueNotes.length} 条笔记`);
 
-      // 保存笔记
       if (this.settings.autoSave) {
         new Notice('正在保存到知识库...');
         await this.saveAndBacklink(input, dedupResult.uniqueNotes);
       } else {
-        // 显示结果弹窗
         new ResultModal(
           this.app,
           { ...result, notes: dedupResult.uniqueNotes },
@@ -259,7 +256,20 @@ export default class AtomicNotesPlugin extends Plugin {
         ).open();
       }
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        new Notice('提炼已取消');
+        return;
+      }
       new Notice(`提炼失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this._abortController = null;
+    }
+  }
+
+  cancelExtraction() {
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
     }
   }
 
@@ -271,6 +281,7 @@ export default class AtomicNotesPlugin extends Plugin {
     notes: AtomicNote[]
   ) {
     let savedPaths: string[] = [];
+    let savedCount = 0;
     try {
       new Notice('正在保存到知识库...');
       const saveResult = await saveNotes(
@@ -282,6 +293,7 @@ export default class AtomicNotesPlugin extends Plugin {
         }
       );
       savedPaths = saveResult.paths;
+      savedCount = saveResult.success;
       if (saveResult.failed > 0 && saveResult.errors.length > 0) {
         new Notice(`保存完成，但 ${saveResult.failed} 条失败：${saveResult.errors.slice(0, 3).join('；')}`);
       } else {
@@ -290,6 +302,7 @@ export default class AtomicNotesPlugin extends Plugin {
     } catch (saveError) {
       new Notice(`保存过程出错：${saveError instanceof Error ? saveError.message : String(saveError)}`);
       console.error('保存失败：', saveError);
+      return; // 保存失败时不记录历史
     }
 
     // 自动创建反向链接
@@ -303,8 +316,8 @@ export default class AtomicNotesPlugin extends Plugin {
       }
     }
 
-    // 记录提炼历史
-    await this.recordHistory(input, notes.length, savedPaths);
+    // 记录提炼历史（只在保存成功后记录，使用实际保存的数量和路径）
+    await this.recordHistory(input, savedCount, savedPaths);
   }
 
   /**

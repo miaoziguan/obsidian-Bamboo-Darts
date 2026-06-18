@@ -33,6 +33,7 @@ export interface PluginSettings {
   // Fact check
   factCheck: boolean;
   verifiedOnly: boolean;
+  enableDataCheck: boolean;
 
   // Discovery
   discoveryRecommendation: boolean;
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   autoBacklink: false,
   factCheck: true,
   verifiedOnly: false,
+  enableDataCheck: true,
   discoveryRecommendation: true,
 
   // Review
@@ -288,6 +290,18 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.verifiedOnly)
           .onChange(async value => {
             this.plugin.settings.verifiedOnly = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('启用数据核查')
+      .setDesc('核查笔记中的数字、百分比、日期等数据是否与原文一致，并尝试验证外部公开数据')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.enableDataCheck)
+          .onChange(async value => {
+            this.plugin.settings.enableDataCheck = value;
             await this.plugin.saveSettings();
           })
       );
