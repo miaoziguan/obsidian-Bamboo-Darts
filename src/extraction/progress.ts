@@ -55,10 +55,9 @@ export function createProgressTracker(onProgress?: ProgressCallback | null): Pro
   };
 
   const start = (phase: string, name: string, detail?: string) => {
-    if (currentIdx >= 0 && events[currentIdx]?.status === 'running') {
-      events[currentIdx].status = 'success';
-      events[currentIdx].elapsedMs = Date.now() - currentStartedAt;
-    }
+    // 注意：不再自动将前一个 'running' 阶段标记为 'success'
+    // 每个阶段必须明确调用 complete()/fail()/skip() 来结束，
+    // 否则 UI 会显示该阶段仍在运行中，避免将"异常终止"误判为"成功完成"
     currentIdx = events.length;
     currentStartedAt = Date.now();
     events.push({ phase, name, status: 'running', detail: detail || '开始...', elapsedMs: 0 });
@@ -101,10 +100,9 @@ export function createProgressTracker(onProgress?: ProgressCallback | null): Pro
   };
 
   const finish = () => {
-    if (currentIdx >= 0 && events[currentIdx]?.status === 'running') {
-      events[currentIdx].status = 'success';
-      events[currentIdx].elapsedMs = Date.now() - currentStartedAt;
-    }
+    // 注意：不再自动将最后一个 'running' 阶段标记为 'success'
+    // 如果有阶段仍显示为 running，说明流程在此处被异常终止，
+    // 需要调查原因而不是静默掩盖
     emit();
   };
 

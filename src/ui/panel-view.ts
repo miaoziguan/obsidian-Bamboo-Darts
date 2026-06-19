@@ -308,7 +308,8 @@ export class AtomicNotesPanel extends ItemView {
         ['Phase 1', '读取内容', '从文本、URL 或剪贴板获取原始内容'],
         ['Phase 2', '质量门控', '5 层规则前置过滤低质/噪声内容，硬拦+软警告'],
         ['Phase 3', 'AI 提炼', '调用 DeepSeek 将内容拆解为原子笔记'],
-        ['Phase 4', '同批去重', '检测同批次中高度相似的笔记并合并'],
+        ['Phase 4', '同批去重', 'TF-IDF + 余弦相似度，检测同批次高度相似笔记'],
+        ['Phase 4b', '知识库去重', '与目标文件夹已有笔记比对，严格不跨目录读取'],
         ['Phase 5', '事实核查', '逐条比对原文，标记有据/存疑/无据，支持长文分段'],
         ['Phase 5b', '数据核查', '检查数字/百分比/日期等数据准确性，内部比对+外部验证'],
         ['Phase 6', '笔记复查', 'AI 二次评分，过滤低价值笔记'],
@@ -318,6 +319,49 @@ export class AtomicNotesPanel extends ItemView {
         row.createEl('span', { text: phase, attr: { style: 'font-size:11px;color:var(--text-accent);flex-shrink:0;min-width:52px' } });
         row.createEl('span', { text: name, attr: { style: 'font-size:12px;font-weight:600;flex-shrink:0;min-width:56px' } });
         row.createEl('span', { text: desc, attr: { style: 'font-size:11px;color:var(--text-muted)' } });
+      }
+
+      // ── 去重算法 ──
+      el.createEl('div', { text: '去重算法', attr: { style: sectionStyle } });
+      el.createEl('p', {
+        text: 'Phase 4 与 Phase 4b 采用 TF-IDF + 余弦相似度算法：',
+        attr: { style: textStyle },
+      });
+      el.createEl('div', {
+        text: '• 中文按字符 3-gram（英文按完整词）提取 token',
+        attr: { style: textStyle + ';padding-left:10px' },
+      });
+      el.createEl('div', {
+        text: '• 每篇文档转化为 TF-IDF 向量，两篇相似度通过向量余弦计算',
+        attr: { style: textStyle + ';padding-left:10px' },
+      });
+      el.createEl('div', {
+        text: '• 相比关键词匹配，对同义词、换说法、近义词更鲁棒',
+        attr: { style: textStyle + ';padding-left:10px' },
+      });
+      el.createEl('p', {
+        text: '知识库去重严格只读取目标文件夹内容，不会扫描知识库其他区域。可在设置中独立指定"去重目标文件夹"。',
+        attr: { style: textStyle },
+      });
+
+      // ── 实时进度反馈 ──
+      el.createEl('div', { text: '实时进度反馈', attr: { style: sectionStyle } });
+      el.createEl('p', {
+        text: '提炼过程中每一步都实时显示当前阶段名称、耗时、子进度，可随时点击"取消"终止流程。',
+        attr: { style: textStyle },
+      });
+      const progressItems = [
+        ['Phase 1', '输入文本读取'],
+        ['Phase 2', '质量门控判定'],
+        ['Phase 3', 'AI 调用与笔记拆解'],
+        ['Phase 4 / 4b', '去重计算'],
+        ['Phase 5 / 5b', '事实与数据核查'],
+        ['Phase 6', '复查评分'],
+      ];
+      for (const [phase, detail] of progressItems) {
+        const row = el.createEl('div', { attr: { style: 'display:flex;gap:8px;padding:2px 0 2px 12px' } });
+        row.createEl('span', { text: phase, attr: { style: 'font-size:11px;color:var(--text-accent);font-weight:600;min-width:72px' } });
+        row.createEl('span', { text: detail, attr: { style: 'font-size:11px;color:var(--text-muted)' } });
       }
 
       // ── 质量门控 ──

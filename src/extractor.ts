@@ -17,6 +17,7 @@ import { verifyFacts, verifyData } from './extraction/fact-checker';
 import { reviewNotes, ReviewConfig } from './review/note-reviewer';
 import { extractUrlContent } from './extraction/url-extractor';
 import { AI_TEMPERATURE, INPUT_TRUNCATE_LENGTH } from './constants';
+import { ProgressCallback, ProgressEvent, createProgressTracker, ProgressTracker } from './extraction/progress';
 
 interface ExtractorConfig {
   deepseekApiKey: string;
@@ -37,6 +38,8 @@ interface ExtractorConfig {
   vault?: Vault;
   targetFolder?: string;
   enableVaultDedup?: boolean;
+  // 进度回调
+  onProgress?: ProgressCallback;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
@@ -56,7 +59,7 @@ const DEFAULT_CONFIG: ExtractorConfig = {
   enableVaultDedup: true,
 };
 
-// ─── Step 日志工具 ───
+// ─── Step 日志工具（向后兼容） ───
 
 interface Step {
   step: string;
@@ -64,16 +67,12 @@ interface Step {
   message: string;
 }
 
-function addStep(steps: Step[], step: string, status: Step['status'], message: string): void {
-  steps.push({ step, status, message });
-}
-
-function updateLastStep(steps: Step[], status: Step['status'], message: string): void {
-  const last = steps[steps.length - 1];
-  if (last) {
-    last.status = status;
-    last.message = message;
-  }
+function eventsToSteps(events: ProgressEvent[]): Step[] {
+  return events.map(e => ({
+    step: `${e.phase} ${e.name}`.trim(),
+    status: (e.status === 'pending' || e.status === 'running') ? 'running' : (e.status as Step['status']),
+    message: e.detail || '',
+  }));
 }
 
 // ─── Phase 1: 读取内容 ───
@@ -242,6 +241,8 @@ export interface ExtractionResult {
   dataCheckSummary?: { consistent: number; deviation: number; unverifiable: number };
   vaultDedupResult?: DedupResult;
   vaultDedupPending?: PendingDuplicate[];
+  // 疑似重复提示（中相似度），供 main.ts 判断是否走"确认后保存"流程
+  duplicateHints?: { noteIndex: number; similarity: number; matchedNote: string; matchedContent: string; newNoteTitle: string; newNoteContent: string }[];
 }
 
 /** 中相似度疑似重复，需用户确认 */
@@ -262,18 +263,18 @@ export async function runExtraction(
   config: Partial<ExtractorConfig> = {}
 ): Promise<ExtractionResult> {
   const fullConfig: ExtractorConfig = { ...DEFAULT_CONFIG, ...config };
-  const steps: Step[] = [];
+  const tracker: ProgressTracker = createProgressTracker(fullConfig.onProgress || null);
 
   // Phase 1: 读取内容
-  addStep(steps, 'Phase 1: 读取内容', 'success', '开始读取...');
+  tracker.start('Phase 1', '读取内容', '开始读取...');
   const readResult = await readContent(input, fullConfig.signal);
 
   if (!readResult.success) {
-    updateLastStep(steps, 'failed', readResult.error || '读取失败');
-    return { success: false, steps, error: readResult.error };
+    tracker.fail(readResult.error || '读取失败');
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: readResult.error };
   }
 
-  updateLastStep(steps, 'success', `成功读取 ${readResult.content!.length} 字`);
+  tracker.complete(`成功读取 ${readResult.content!.length} 字`);
 
   const content = readResult.content!;
 
@@ -283,42 +284,46 @@ export async function runExtraction(
     : content;
 
   // Phase 2: 质量门控
-  addStep(steps, 'Phase 2: 质量门控', 'success', '开始检查...');
+  tracker.start('Phase 2', '质量门控', '开始检查...');
   const gateResult = runGateChecks(content);
 
   if (!gateResult.passed) {
-    updateLastStep(steps, 'failed', gateResult.reasons.join('; '));
-    return { success: false, steps, error: gateResult.reasons.join('; ') };
+    tracker.fail(gateResult.reasons.join('; '));
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: gateResult.reasons.join('; ') };
   }
 
   if (gateResult.warnings.length > 0) {
-    updateLastStep(steps, 'success', `通过（${gateResult.warnings.length} 条提醒）`);
-    const lastStep = steps[steps.length - 1];
-    lastStep.message += '\n' + gateResult.warnings.join('\n');
+    tracker.complete(`通过（${gateResult.warnings.length} 条提醒）`);
   } else {
-    updateLastStep(steps, 'success', '通过');
+    tracker.complete('通过');
   }
 
   // Phase 3: 提炼原子笔记（AI 模式）
-  addStep(steps, 'Phase 3: 提炼原子笔记', 'success', '正在调用 DeepSeek API...');
+  tracker.start('Phase 3', '提炼原子笔记', '正在调用 DeepSeek API...');
   const extractResult = await extractAtomicNotes(truncatedContent, config);
 
   if (!extractResult.success) {
-    updateLastStep(steps, 'failed', extractResult.error || '提炼失败');
-    return { success: false, steps, error: extractResult.error };
+    tracker.fail(extractResult.error || '提炼失败');
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: extractResult.error };
   }
 
-  updateLastStep(steps, 'success', `成功提炼 ${extractResult.notes!.length} 条原子笔记`);
+  tracker.complete(`成功提炼 ${extractResult.notes!.length} 条原子笔记`);
   let notes: AtomicNote[] = extractResult.notes!;
 
   // Phase 4: 同批交叉去重
-  addStep(steps, 'Phase 4: 同批交叉去重', 'success', '开始去重...');
+  tracker.start('Phase 4', '同批交叉去重', '开始去重...');
   const dedupResult = crossCheckBatch(notes);
-  updateLastStep(steps, 'success', `去重后剩余 ${dedupResult.uniqueNotes.length} 条（去除 ${notes.length - dedupResult.uniqueNotes.length} 条重复）`);
+  tracker.complete(`去重后剩余 ${dedupResult.uniqueNotes.length} 条（去除 ${notes.length - dedupResult.uniqueNotes.length} 条重复）`);
   notes = dedupResult.uniqueNotes;
 
   if (notes.length === 0) {
-    return { success: false, steps, error: '未提炼出任何符合标准的原子笔记', notes: [] };
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '未提炼出任何符合标准的原子笔记', notes: [] };
+  }
+
+  // 取消检查点（Phase 4 → 4b）
+  if (fullConfig.signal?.aborted) {
+    tracker.fail('已取消');
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
   }
 
   // Phase 4b: 知识库去重（可选）
@@ -326,7 +331,7 @@ export async function runExtraction(
   let vaultDedupPending: PendingDuplicate[] = [];
 
   if (fullConfig.enableVaultDedup && fullConfig.vault) {
-    addStep(steps, 'Phase 4b: 知识库去重', 'success', '正在与已有笔记比对...');
+    tracker.start('Phase 4b', '知识库去重', '正在与已有笔记比对...');
 
     const matchInfos: VaultMatchInfo[] = await checkAgainstVaultDetailed(
       fullConfig.vault,
@@ -334,8 +339,9 @@ export async function runExtraction(
       fullConfig.targetFolder || ''
     );
 
-    const HIGH_SIM_THRESHOLD = 0.8;
-    const MID_SIM_THRESHOLD = 0.6;
+    // TF-IDF + 余弦相似度的阈值（比旧 Jaccard 阈值略低，因为余弦对短文本更"宽容"）
+    const HIGH_SIM_THRESHOLD = 0.70;
+    const MID_SIM_THRESHOLD = 0.55;
 
     const keptNotes: AtomicNote[] = [];
     const highDupCount = matchInfos.filter(m => m.bestMatch && m.bestMatch.similarity >= HIGH_SIM_THRESHOLD).length;
@@ -343,7 +349,6 @@ export async function runExtraction(
 
     for (const info of matchInfos) {
       if (!info.bestMatch) {
-        // 无匹配，保留
         keptNotes.push(info.note);
       } else if (info.bestMatch.similarity >= HIGH_SIM_THRESHOLD) {
         // 高相似度：自动去重，跳过
@@ -359,14 +364,12 @@ export async function runExtraction(
           newNoteContent: info.note.content,
         });
       } else {
-        // 低相似度：保留
         keptNotes.push(info.note);
       }
     }
 
     notes = keptNotes;
 
-    // 构建 DedupResult 用于兼容展示
     vaultDedupResult = {
       uniqueNotes: keptNotes,
       removedCount: highDupCount,
@@ -380,18 +383,23 @@ export async function runExtraction(
         })),
     };
 
-    updateLastStep(steps, 'success',
-      `知识库去重：去除 ${highDupCount} 条高相似度重复，${midDupCount} 条待确认`
-    );
+    tracker.complete(`知识库去重：去除 ${highDupCount} 条高相似度重复，${midDupCount} 条待确认`);
   } else {
-    addStep(steps, 'Phase 4b: 知识库去重', 'skipped', '未启用或无 Vault，跳过');
+    tracker.start('Phase 4b', '知识库去重', '未启用或无 Vault');
+    tracker.skip('未启用或无 Vault，跳过');
+  }
+
+  // 取消检查点（Phase 4b → 5）
+  if (fullConfig.signal?.aborted) {
+    tracker.fail('已取消');
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
   }
 
   // Phase 5: 事实核查（可选）
   let factCheckSummary: { verified: number; doubtful: number; unverified: number } | undefined;
 
   if (fullConfig.factCheck) {
-    addStep(steps, 'Phase 5: 事实核查', 'success', '正在核实关键事实...');
+    tracker.start('Phase 5', '事实核查', '正在核实关键事实...');
     const factResult = await verifyFacts(truncatedContent, notes, {
       deepseekApiKey: fullConfig.deepseekApiKey,
       deepseekApiUrl: fullConfig.deepseekApiUrl,
@@ -403,33 +411,58 @@ export async function runExtraction(
     factCheckSummary = { verified: factResult.verified, doubtful: factResult.doubtful, unverified: factResult.unverified };
 
     if (factResult.error) {
-      updateLastStep(steps, 'failed', `核查出错: ${factResult.error}`);
+      tracker.fail(`核查出错: ${factResult.error}`);
     } else {
-      updateLastStep(steps, 'success',
-        `${notes.length} 条笔记中：有据 ${factResult.verified} 条，存疑 ${factResult.doubtful} 条，无据 ${factResult.unverified} 条`
-      );
-
       if (fullConfig.verifiedOnly) {
         const originalCount = notes.length;
+        // Phase 5 过滤后，重新映射 vaultDedupPending 的索引
+        const preFilterNotes = notes; // 过滤前的笔记数组
+        const preFilterPendingIndices = new Map<string, number>(); // 标题 → 过滤前索引
+        preFilterNotes.forEach((note, idx) => preFilterPendingIndices.set(note.title, idx));
+
         notes = notes.filter(note => {
           const v = note.verification;
           if (!v || v.length === 0) return true;
           return !v.some(r => r.status === '无据');
         });
-        updateLastStep(steps, 'success',
-          `过滤无据笔记：${originalCount} → ${notes.length} 条`
-        );
+
+        // 基于标题重建新数组中的索引映射
+        const postFilterIndexMap = new Map<string, number>(); // 标题 → 过滤后索引
+        notes.forEach((note, idx) => postFilterIndexMap.set(note.title, idx));
+
+        // 重映射 vaultDedupPending 中的 newNoteIndex
+        vaultDedupPending = vaultDedupPending
+          .filter(p => {
+            // 只有同时存在于过滤前后才保留
+            const preIdx = preFilterPendingIndices.get(p.newNoteTitle);
+            return preIdx !== undefined && postFilterIndexMap.has(p.newNoteTitle);
+          })
+          .map(p => ({
+            ...p,
+            newNoteIndex: postFilterIndexMap.get(p.newNoteTitle)!,
+          }));
+
+        tracker.complete(`${notes.length} 条笔记中：有据 ${factResult.verified} 条，存疑 ${factResult.doubtful} 条，无据 ${factResult.unverified} 条（过滤无据：${originalCount} → ${notes.length}）`);
+      } else {
+        tracker.complete(`${notes.length} 条笔记中：有据 ${factResult.verified} 条，存疑 ${factResult.doubtful} 条，无据 ${factResult.unverified} 条`);
       }
     }
   } else {
-    addStep(steps, 'Phase 5: 事实核查', 'skipped', '未启用，跳过');
+    tracker.start('Phase 5', '事实核查', '未启用');
+    tracker.skip('未启用，跳过');
+  }
+
+  // 取消检查点（Phase 5 → 5b）
+  if (fullConfig.signal?.aborted) {
+    tracker.fail('已取消');
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
   }
 
   // Phase 5b: 数据核查（可选）
   let dataCheckSummary: { consistent: number; deviation: number; unverifiable: number } | undefined;
 
   if (fullConfig.enableDataCheck) {
-    addStep(steps, 'Phase 5b: 数据核查', 'success', '正在核查数据准确性...');
+    tracker.start('Phase 5b', '数据核查', '正在核查数据准确性...');
     const dataResult = await verifyData(truncatedContent, notes, {
       deepseekApiKey: fullConfig.deepseekApiKey,
       deepseekApiUrl: fullConfig.deepseekApiUrl,
@@ -440,20 +473,24 @@ export async function runExtraction(
     dataCheckSummary = { consistent: dataResult.consistent, deviation: dataResult.deviation, unverifiable: dataResult.unverifiable };
 
     if (dataResult.error) {
-      updateLastStep(steps, 'failed', `数据核查出错: ${dataResult.error}`);
+      tracker.fail(`数据核查出错: ${dataResult.error}`);
     } else {
-      updateLastStep(steps, 'success',
-        `数据点核查：一致 ${dataResult.consistent} 个，偏差 ${dataResult.deviation} 个，无法验证 ${dataResult.unverifiable} 个`
-      );
+      tracker.complete(`数据点核查：一致 ${dataResult.consistent} 个，偏差 ${dataResult.deviation} 个，无法验证 ${dataResult.unverifiable} 个`);
     }
   } else {
-    addStep(steps, 'Phase 5b: 数据核查', 'skipped', '未启用，跳过');
+    tracker.start('Phase 5b', '数据核查', '未启用');
+    tracker.skip('未启用，跳过');
+  }
+
+  // 取消检查点（Phase 5b → 6）
+  if (fullConfig.signal?.aborted) {
+    tracker.fail('已取消');
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
   }
 
   // Phase 6: 笔记复查（可选）
-
   if (fullConfig.enableReview) {
-    addStep(steps, 'Phase 6: 笔记复查（AI 双重保险）', 'success', '正在对笔记进行价值评分...');
+    tracker.start('Phase 6', '笔记复查（AI 双重保险）', '正在对笔记进行价值评分...');
 
     const reviewConfig: ReviewConfig = {
       deepseekApiKey: fullConfig.reviewApiKey || fullConfig.deepseekApiKey,
@@ -467,31 +504,67 @@ export async function runExtraction(
 
     // 使用复查后的笔记（若复查失败，reviewNotes 内部已降级返回原始笔记）
     const filteredCount = notes.length - reviewResult.reviewedNotes.length;
+
+    // Phase 6 复查后，重新映射 vaultDedupPending 的索引
+    const preReviewPendingTitles = new Set(vaultDedupPending.map(p => p.newNoteTitle));
+    const postReviewIndexMap = new Map<string, number>(); // 标题 → 复查后索引
+    reviewResult.reviewedNotes.forEach((note, idx) => postReviewIndexMap.set(note.title, idx));
+
+    // 过滤并重映射
+    vaultDedupPending = vaultDedupPending
+      .filter(p => postReviewIndexMap.has(p.newNoteTitle))
+      .map(p => ({
+        ...p,
+        newNoteIndex: postReviewIndexMap.get(p.newNoteTitle)!,
+      }));
+
     notes = reviewResult.reviewedNotes;
 
-    const hasFailure = reviewResult.reviewDetails.some(d =>
-      d.reason.includes('失败') || d.reason.includes('降级')
-    );
-    if (hasFailure) {
-      updateLastStep(steps, 'failed', '复查失败，已降级使用原始笔记');
+    // 以 reviewResult.success 为准，不再扫描 AI 输出的中文理由（避免"失败"二字误判）
+    if (!reviewResult.success) {
+      tracker.fail('复查失败，已降级使用原始笔记');
     } else if (filteredCount > 0) {
-      updateLastStep(steps, 'success',
-        `复查完成，过滤 ${filteredCount} 条低质量笔记，保留 ${notes.length} 条`
-      );
+      tracker.complete(`复查完成，过滤 ${filteredCount} 条低质量笔记，保留 ${notes.length} 条`);
     } else {
-      updateLastStep(steps, 'success', '复查完成，无低质量笔记需要过滤');
+      tracker.complete('复查完成，无低质量笔记需要过滤');
     }
   } else {
-    addStep(steps, 'Phase 6: 笔记复查', 'skipped', '未启用，跳过');
+    tracker.start('Phase 6', '笔记复查', '未启用');
+    tracker.skip('未启用，跳过');
   }
+
+  // 收尾
+  tracker.finish();
+
+  // **更新 vaultDedupResult.uniqueNotes**：确保它引用最终过滤后的笔记数组
+  // Phase 5/6 可能进一步过滤笔记，但 vaultDedupResult 是在 Phase 4b 构建的
+  if (vaultDedupResult) {
+    vaultDedupResult = {
+      ...vaultDedupResult,
+      uniqueNotes: notes,
+    };
+  }
+
+  // 构造 duplicateHints（从 vaultDedupPending 派生）
+  const duplicateHints = vaultDedupPending.length > 0
+    ? vaultDedupPending.map(p => ({
+        noteIndex: p.newNoteIndex,
+        similarity: p.similarity,
+        matchedNote: p.matchedNote,
+        matchedContent: p.matchedContent,
+        newNoteTitle: p.newNoteTitle,
+        newNoteContent: p.newNoteContent,
+      }))
+    : undefined;
 
   return {
     success: true,
     notes,
-    steps,
+    steps: eventsToSteps(tracker.allEvents()),
     factCheckSummary,
     dataCheckSummary,
     vaultDedupResult,
     vaultDedupPending: vaultDedupPending.length > 0 ? vaultDedupPending : undefined,
+    duplicateHints,
   };
 }
