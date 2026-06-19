@@ -483,7 +483,6 @@ export class AtomicNotesPanel extends ItemView {
         inputData = { type: 'text', content: inputContent };
       }
 
-      this.plugin._isExtracting = true;
       extractBtn.setText('提炼中...');
       extractBtn.disabled = true;
       cancelBtn.style.display = '';
@@ -491,7 +490,6 @@ export class AtomicNotesPanel extends ItemView {
       try {
         await this.plugin.runExtraction(inputData);
       } finally {
-        this.plugin._isExtracting = false;
         extractBtn.setText('开始提炼');
         extractBtn.disabled = false;
         cancelBtn.style.display = 'none';
