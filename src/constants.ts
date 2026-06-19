@@ -56,3 +56,21 @@ export const MAX_FACTS_PER_CHECK = 20;
 
 /** 原文截断阈值（与 INPUT_TRUNCATE_LENGTH 对齐，避免 Phase 5 核查盲区） */
 export const ORIGINAL_TEXT_CHUNK_SIZE = 10000;
+
+/** 【新版去重】高相似度阈值（几乎重复） */
+export const DEDUP_HIGH_THRESHOLD = 0.70;
+
+/** 【新版去重】中相似度阈值（主题接近） */
+export const DEDUP_MID_THRESHOLD = 0.45;
+
+/** 【新版去重】弱相关阈值（有部分术语重合） */
+export const DEDUP_WEAK_THRESHOLD = 0.30;
+
+/** 【新版去重】最小 corpus 大小（低于此值降级为纯 TF 余弦） */
+export const DEDUP_CORPUS_MIN_SIZE = 20;
+
+/** 【新版去重】缓存 TTL（毫秒） */
+export const DEDUP_CACHE_TTL = 5 * 60 * 1000;
+
+/** 【新版去重】TOP-K 相似匹配返回数量 */
+export const DEDUP_TOP_K = 3;

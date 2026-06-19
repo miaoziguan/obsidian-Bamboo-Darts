@@ -1,0 +1,122 @@
+/**
+ * 实时进度反馈系统
+ *
+ * 设计目标：让用户在 30 秒的提炼过程中感知"程序还活着，正在做什么"
+ *
+ * 用法：
+ *   const tracker = createProgressTracker(onProgress);
+ *   tracker.start('Phase 3', 'AI 提炼');
+ *   // ... 执行耗时操作 ...
+ *   tracker.update({ detail: '已收到响应，解析中...' });
+ *   tracker.complete('成功提炼 8 条笔记');
+ */
+
+// === 类型定义 ===
+
+export type ProgressStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+
+export interface ProgressEvent {
+  phase: string;
+  name: string;
+  status: ProgressStatus;
+  detail?: string;
+  subProgress?: { current: number; total: number; label?: string; } | null;
+  elapsedMs?: number;
+}
+
+export type ProgressCallback = (event: ProgressEvent, allEvents: ProgressEvent[], totalElapsedMs: number) => void;
+
+export type SubProgressCallback = (current: number, total: number, label?: string) => void;
+
+// === ProgressTracker：封装阶段生命周期 ===
+
+export interface ProgressTracker {
+  start: (phase: string, name: string, detail?: string) => void;
+  update: (patch: { detail?: string; subProgress?: ProgressEvent['subProgress'] }) => void;
+  complete: (detail?: string) => void;
+  skip: (detail?: string) => void;
+  fail: (detail?: string) => void;
+  finish: () => void;
+  currentIndex: () => number;
+  allEvents: () => ProgressEvent[];
+}
+
+export function createProgressTracker(onProgress?: ProgressCallback | null): ProgressTracker {
+  const events: ProgressEvent[] = [];
+  const startedAt = Date.now();
+  let currentIdx = -1;
+  let currentStartedAt = 0;
+
+  const emit = () => {
+    if (!onProgress) return;
+    const last = events[events.length - 1];
+    if (!last) return;
+    onProgress(last, events.slice(), Date.now() - startedAt);
+  };
+
+  const start = (phase: string, name: string, detail?: string) => {
+    if (currentIdx >= 0 && events[currentIdx]?.status === 'running') {
+      events[currentIdx].status = 'success';
+      events[currentIdx].elapsedMs = Date.now() - currentStartedAt;
+    }
+    currentIdx = events.length;
+    currentStartedAt = Date.now();
+    events.push({ phase, name, status: 'running', detail: detail || '开始...', elapsedMs: 0 });
+    emit();
+  };
+
+  const update = (patch: { detail?: string; subProgress?: ProgressEvent['subProgress'] }) => {
+    if (currentIdx < 0) return;
+    if (patch.detail !== undefined) events[currentIdx].detail = patch.detail;
+    if (patch.subProgress !== undefined) events[currentIdx].subProgress = patch.subProgress;
+    events[currentIdx].elapsedMs = Date.now() - currentStartedAt;
+    emit();
+  };
+
+  const complete = (detail?: string) => {
+    if (currentIdx < 0) return;
+    events[currentIdx].status = 'success';
+    if (detail !== undefined) events[currentIdx].detail = detail;
+    events[currentIdx].elapsedMs = Date.now() - currentStartedAt;
+    events[currentIdx].subProgress = null;
+    emit();
+  };
+
+  const skip = (detail?: string) => {
+    if (currentIdx < 0) return;
+    events[currentIdx].status = 'skipped';
+    if (detail !== undefined) events[currentIdx].detail = detail;
+    events[currentIdx].elapsedMs = 0;
+    events[currentIdx].subProgress = null;
+    emit();
+  };
+
+  const fail = (detail?: string) => {
+    if (currentIdx < 0) return;
+    events[currentIdx].status = 'failed';
+    if (detail !== undefined) events[currentIdx].detail = detail;
+    events[currentIdx].elapsedMs = Date.now() - currentStartedAt;
+    events[currentIdx].subProgress = null;
+    emit();
+  };
+
+  const finish = () => {
+    if (currentIdx >= 0 && events[currentIdx]?.status === 'running') {
+      events[currentIdx].status = 'success';
+      events[currentIdx].elapsedMs = Date.now() - currentStartedAt;
+    }
+    emit();
+  };
+
+  return { start, update, complete, skip, fail, finish, currentIndex: () => currentIdx, allEvents: () => events.slice() };
+}
+
+/** 把一个 ProgressCallback 包装成只报告子进度的 SubProgressCallback */
+export function wrapAsSubProgress(tracker: ProgressTracker, baseLabel = ''): SubProgressCallback {
+  return (current, total, label) => {
+    tracker.update({
+      subProgress: { current, total, label: label || baseLabel },
+      detail: baseLabel ? `${baseLabel} ${current}/${total}` : `进度 ${current}/${total}`,
+    });
+  };
+}
