@@ -41,9 +41,9 @@ interface ReviewResult {
 export async function reviewNotes(
   notes: AtomicNote[],
   config: ReviewConfig
-): Promise<{ reviewedNotes: AtomicNote[]; reviewDetails: ReviewResult[] }> {
+): Promise<{ reviewedNotes: AtomicNote[]; reviewDetails: ReviewResult[]; success: boolean }> {
   if (notes.length === 0) {
-    return { reviewedNotes: [], reviewDetails: [] };
+    return { reviewedNotes: [], reviewDetails: [], success: true };
   }
 
   const prompt = buildReviewPrompt(notes);
@@ -77,18 +77,15 @@ export async function reviewNotes(
     const aiContent = response.json?.choices?.[0]?.message?.content || '';
     const reviewDetails = parseReviewOutput(aiContent, notes.length);
 
-    // 按分数排序：保留的笔记从高到低
     const kept = reviewDetails
       .filter(r => r.verdict === '保留')
       .sort((a, b) => b.finalScore - a.finalScore);
 
-    // 按排序后的顺序取原笔记（格式不变）
     const reviewedNotes = kept.map(r => notes[r.index]).filter(Boolean);
 
-    return { reviewedNotes, reviewDetails };
+    return { reviewedNotes, reviewDetails, success: true };
   } catch (error) {
     console.error('[笔记复查] AI 调用失败，降级处理（返回原始笔记）：', error);
-    // 复查失败时降级：返回原始笔记，不过滤
     return {
       reviewedNotes: [...notes],
       reviewDetails: notes.map((_, i) => ({
@@ -99,6 +96,7 @@ export async function reviewNotes(
         verdict: '保留' as const,
         reason: '复查失败，默认保留',
       })),
+      success: false,
     };
   }
 }

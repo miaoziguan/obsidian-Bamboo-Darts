@@ -233,13 +233,13 @@ export default class AtomicNotesPlugin extends Plugin {
       if (this.settings.autoSave) {
         if (result.duplicateHints && result.duplicateHints.length > 0) {
           new Notice(`检测到 ${new Set(result.duplicateHints.map(h => h.noteIndex)).size} 篇疑似重复笔记，请确认后保存`);
-          new ResultModal(this.app, result, async (notes) => { await this.saveAndBacklink(input, notes); }).open();
+          new ResultModal(this.app, result, result.vaultDedupResult, async (notes) => { await this.saveAndBacklink(input, notes); }).open();
         } else {
           new Notice('正在保存到知识库...');
           await this.saveAndBacklink(input, result.notes);
         }
       } else {
-        new ResultModal(this.app, result, async (notes) => { await this.saveAndBacklink(input, notes); }).open();
+        new ResultModal(this.app, result, result.vaultDedupResult, async (notes) => { await this.saveAndBacklink(input, notes); }).open();
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') { new Notice('提炼已取消'); return; }

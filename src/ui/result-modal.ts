@@ -49,37 +49,29 @@ export class ResultModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
 
-    // 默认全选
-    this.selectedNotes = new Set(this.result.notes.map((_, i) => i));
-
-    // 标题
     contentEl.createEl('h2', { text: '原子笔记提炼结果' });
 
-    // 流程步骤 — 时间线样式
     this.renderSteps(contentEl);
 
-    if (this.result.success) {
-      // 去重报告
+    if (this.result.success && this.result.notes) {
+      this.selectedNotes = new Set(this.result.notes.map((_, i) => i));
+
       if (this.dedupResult) {
         this.renderDedupReport(contentEl);
       }
 
-      // 疑似重复确认（Phase 4b 中相似度笔记）
       if (this.result.vaultDedupPending && this.result.vaultDedupPending.length > 0) {
         this.renderPendingDuplicates(contentEl);
       }
 
-      // 事实核查摘要
       if (this.result.factCheckSummary) {
         this.renderFactCheckSummary(contentEl);
       }
 
-      // 数据核查摘要
       if (this.result.dataCheckSummary) {
         this.renderDataCheckSummary(contentEl);
       }
 
-      // 笔记列表
       this.renderNotes(contentEl);
     } else {
       const errEl = contentEl.createEl('p', { cls: 'atomic-notes-error' });
