@@ -1,4 +1,4 @@
- /**
+/**
  * Bamboo Darts - 主入口文件
  *
  * 功能：从文章/链接/选中文本中提炼原子笔记，自动去重后存入知识库
@@ -113,7 +113,7 @@ export default class AtomicNotesPlugin extends Plugin {
       this.app.workspace.revealLeaf(existing[0]);
       return;
     }
-    const leaf = this.app.wault.getLeaf('split');
+    const leaf = this.app.workspace.getLeaf('split');
     await leaf.setViewState({ type: VIEW_TYPE_ATOMIC_PANEL, active: true });
     this.app.workspace.revealLeaf(leaf);
   }
