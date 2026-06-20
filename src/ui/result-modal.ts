@@ -69,6 +69,11 @@ export class ResultModal extends Modal {
 
     this.renderSteps(contentEl);
 
+    // 门控警告提示栏（仅提炼成功时显示）
+    if (this.result.success && this.result.gateWarnings && this.result.gateWarnings.length > 0) {
+      this.renderGateWarnings(contentEl);
+    }
+
     if (this.result.success && this.result.notes) {
       this.selectedNotes = new Set(this.result.notes.map((_, i) => i));
 
@@ -129,6 +134,40 @@ export class ResultModal extends Modal {
       // 内容
       item.createEl('div', { cls: 'atomic-notes-timeline-step', text: step.step });
       item.createEl('div', { cls: 'atomic-notes-timeline-message', text: step.message });
+    }
+  }
+
+  /** 门控警告栏（黄色提示，不阻断） */
+  private renderGateWarnings(container: HTMLElement) {
+    const warnings = this.result.gateWarnings;
+    if (!warnings || warnings.length === 0) return;
+
+    const box = container.createEl('div', {
+      attr: {
+        style: [
+          'border-left: 3px solid var(--color-orange)',
+          'background: rgba(var(--color-orange-rgb, 255,160,0), 0.08)',
+          'border-radius: 6px',
+          'padding: 8px 12px',
+          'margin-bottom: 10px',
+        ].join(';'),
+      },
+    });
+
+    const titleRow = box.createEl('div', {
+      attr: { style: 'display:flex;align-items:center;gap:6px;margin-bottom:4px' },
+    });
+    titleRow.createEl('span', { text: '⚠️', attr: { style: 'font-size:13px' } });
+    titleRow.createEl('span', {
+      text: `门控警告（${warnings.length} 条，不影响提炼结果）`,
+      attr: { style: 'font-weight:600;font-size:12px;color:var(--color-orange)' },
+    });
+
+    const list = box.createEl('ul', {
+      attr: { style: 'margin:0;padding-left:18px;font-size:12px;color:var(--text-muted);line-height:1.7' },
+    });
+    for (const w of warnings) {
+      list.createEl('li', { text: w });
     }
   }
 

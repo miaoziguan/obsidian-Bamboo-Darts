@@ -81,6 +81,10 @@ describe('resolveProfileConfig', () => {
     expect(config).toEqual(PROFILE_CONFIGS.dense);
     expect(config.crossBatchThreshold).toBe(0.75);
     expect(config.reviewMinScore).toBe(2);
+    expect(config.gateMinDensity).toBe(0.15);
+    expect(config.gateWarnDensity).toBe(0.50);
+    expect(config.gateMaxNoiseRatio).toBe(0.75);
+    expect(config.gateWarnNoiseRatio).toBe(0.45);
   });
 
   it('应用户自定义覆盖默认值', () => {
@@ -89,7 +93,6 @@ describe('resolveProfileConfig', () => {
     });
     expect(config.reviewMinScore).toBe(5);
     expect(config.crossBatchThreshold).toBe(0.8);
-    // 未覆盖的字段保留默认值
     expect(config.vaultHighThreshold).toBe(PROFILE_CONFIGS.balanced.vaultHighThreshold);
   });
 
@@ -105,6 +108,39 @@ describe('resolveProfileConfig', () => {
       const config = resolveProfileConfig(profile);
       expect(config).toEqual(PROFILE_CONFIGS[profile]);
     }
+  });
+
+  it('门控阈值应可被用户覆盖', () => {
+    const config = resolveProfileConfig('balanced', {
+      balanced: { gateMinDensity: 0.05, gateWarnDensity: 0.15 },
+    });
+    expect(config.gateMinDensity).toBe(0.05);
+    expect(config.gateWarnDensity).toBe(0.15);
+    // 未覆盖的噪声阈值保留默认
+    expect(config.gateMaxNoiseRatio).toBe(PROFILE_CONFIGS.balanced.gateMaxNoiseRatio);
+  });
+});
+
+// ─── ProfileConfig 门控阈值完整性 ───
+
+describe('ProfileConfig gate thresholds', () => {
+  it('每个 profile 都应有完整的门控阈值字段', () => {
+    for (const profile of ['dense', 'balanced', 'sparse'] as const) {
+      const config = PROFILE_CONFIGS[profile];
+      expect(typeof config.gateMinDensity).toBe('number');
+      expect(typeof config.gateWarnDensity).toBe('number');
+      expect(typeof config.gateMaxNoiseRatio).toBe('number');
+      expect(typeof config.gateWarnNoiseRatio).toBe('number');
+      expect(config.gateMinDensity).toBeLessThan(config.gateWarnDensity);
+      expect(config.gateWarnNoiseRatio).toBeLessThan(config.gateMaxNoiseRatio);
+    }
+  });
+
+  it('dense 应比 balanced 更宽松，balanced 应比 sparse 更宽松', () => {
+    expect(PROFILE_CONFIGS.dense.gateMinDensity).toBeLessThanOrEqual(PROFILE_CONFIGS.balanced.gateMinDensity);
+    expect(PROFILE_CONFIGS.balanced.gateMinDensity).toBeLessThanOrEqual(PROFILE_CONFIGS.sparse.gateMinDensity);
+    expect(PROFILE_CONFIGS.dense.gateMaxNoiseRatio).toBeGreaterThanOrEqual(PROFILE_CONFIGS.balanced.gateMaxNoiseRatio);
+    expect(PROFILE_CONFIGS.balanced.gateMaxNoiseRatio).toBeGreaterThanOrEqual(PROFILE_CONFIGS.sparse.gateMaxNoiseRatio);
   });
 });
 

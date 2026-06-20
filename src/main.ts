@@ -214,7 +214,7 @@ export default class AtomicNotesPlugin extends Plugin {
     } catch (error) { new Notice('无法读取剪贴板，请检查权限'); }
   }
 
-  async runExtraction(input: { type: 'url' | 'text' | 'selection'; content: string }, opts: { onProgress?: ProgressCallback } = {}) {
+  async runExtraction(input: { type: 'url' | 'text' | 'selection'; content: string }, opts: { onProgress?: ProgressCallback; skipGate?: boolean } = {}) {
     if (this._isExtracting) { new Notice('已有提取任务在进行中，请等待完成后再试'); return; }
     this._isExtracting = true;
     if (!this.settings.deepseekApiKey) {
@@ -292,10 +292,31 @@ export default class AtomicNotesPlugin extends Plugin {
         },
         // 深度提炼
         enableDeepMode: this.settings.enableDeepMode,
+        // 强制提炼（跳过门控）
+        skipGate: opts.skipGate,
       });
       if (!result.success || !result.notes) {
-        if (result.error && result.error.includes('取消')) new Notice('提炼已取消');
-        else new Notice(`提炼失败：${result.error}`);
+        if (result.error && result.error.includes('取消')) {
+          new Notice('提炼已取消');
+        } else if (result.gateBlocked) {
+          // 门控失败 → 弹确认框，提供强制提炼选项
+          this._isExtracting = false;
+          this._abortController = null;
+          if (progressModal) {
+            try {
+              progressModal.contentEl.empty();
+              progressModal.close();
+              if (progressModal.containerEl?.parentNode) {
+                progressModal.containerEl.parentNode.removeChild(progressModal.containerEl);
+              }
+            } catch { /* 忽略 */ }
+            progressModal = null;
+          }
+          this.showForceExtractConfirm(input, result.error || '内容质量不达标');
+          return;
+        } else {
+          new Notice(`提炼失败：${result.error}`);
+        }
         return;
       }
       new Notice(`提炼完成，共 ${result.notes.length} 条原子笔记`);
@@ -333,6 +354,76 @@ export default class AtomicNotesPlugin extends Plugin {
 
   cancelExtraction() {
     if (this._abortController) { this._abortController.abort(); }
+  }
+
+  /**
+   * 门控失败后的强制提炼确认框
+   */
+  private showForceExtractConfirm(
+    input: { type: 'url' | 'text' | 'selection'; content: string },
+    gateError: string
+  ) {
+    const modal = new (class extends Modal {
+      plugin: AtomicNotesPlugin;
+      input: { type: 'url' | 'text' | 'selection'; content: string };
+      gateError: string;
+
+      constructor(plugin: AtomicNotesPlugin, input: { type: 'url' | 'text' | 'selection'; content: string }, gateError: string) {
+        super(plugin.app);
+        this.plugin = plugin;
+        this.input = input;
+        this.gateError = gateError;
+      }
+
+      onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+
+        contentEl.createEl('h3', { text: '⚠️ 内容质量门控未通过' });
+
+        // 原因说明
+        const reasonBox = contentEl.createEl('div', {
+          attr: {
+            style: [
+              'background:var(--background-secondary)',
+              'border-left:3px solid var(--color-orange)',
+              'border-radius:6px',
+              'padding:8px 12px',
+              'margin:10px 0',
+              'font-size:13px',
+              'color:var(--text-muted)',
+            ].join(';'),
+          },
+        });
+        reasonBox.setText(this.gateError);
+
+        contentEl.createEl('p', {
+          text: '强制提炼将跳过质量检查，直接发送给 AI。低质内容可能导致提炼结果较差。',
+          attr: { style: 'font-size:13px;color:var(--text-muted);margin:8px 0' },
+        });
+
+        // 按钮栏
+        const btnRow = contentEl.createEl('div', {
+          attr: { style: 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px' },
+        });
+
+        const cancelBtn = btnRow.createEl('button', { text: '放弃' });
+        cancelBtn.addEventListener('click', () => this.close());
+
+        const forceBtn = btnRow.createEl('button', {
+          text: '强制提炼',
+          attr: { style: 'background:var(--color-orange);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600' },
+        });
+        forceBtn.addEventListener('click', async () => {
+          this.close();
+          await this.plugin.runExtraction(this.input, { skipGate: true });
+        });
+      }
+
+      onClose() { this.contentEl.empty(); }
+    })(this, input, gateError);
+
+    modal.open();
   }
 
   private async saveAndBacklink(input: { type: 'url' | 'text' | 'selection'; content: string }, notes: AtomicNote[]) {

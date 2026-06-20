@@ -80,6 +80,8 @@ export async function extractChunked(
 ): Promise<AtomicNote[]> {
   const chunks = splitContent(content, INPUT_TRUNCATE_LENGTH, CHUNK_OVERLAP);
   const allNotes: AtomicNote[] = [];
+  let successCount = 0;
+  let failCount = 0;
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -100,12 +102,36 @@ export async function extractChunked(
 
     if (result.success && result.notes) {
       allNotes.push(...result.notes);
+      successCount++;
+    } else {
+      failCount++;
+      // 发送失败事件
+      if (onProgress) {
+        const event: ProgressEvent = {
+          phase: phaseLabel,
+          name: `深度提炼 第${i + 1}/${chunks.length}轮`,
+          detail: `失败: ${result.error || '未知错误'}`,
+          status: 'failed',
+        };
+        onProgress(event, [], 0);
+      }
     }
 
     // 段间延迟
     if (i < chunks.length - 1) {
       await new Promise(resolve => setTimeout(resolve, CHUNK_DELAY_MS));
     }
+  }
+
+  // 发送总结事件
+  if (onProgress) {
+    const event: ProgressEvent = {
+      phase: 'Phase 3',
+      name: '深度提炼总结',
+      detail: `${chunks.length}段中，${successCount}段成功，${failCount}段失败`,
+      status: failCount > 0 ? 'failed' : 'success',
+    };
+    onProgress(event, [], 0);
   }
 
   return allNotes;

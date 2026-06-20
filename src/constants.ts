@@ -15,11 +15,11 @@ export const MAX_CONTENT_LENGTH = 50000;
 /** 重复内容相似度阈值（质量门控） */
 export const GATE_DUPLICATE_THRESHOLD = 0.5;
 
-/** 信息密度——警告阈值（去重词数/总词数） */
-export const GATE_WARN_DENSITY = 0.3;
+/** 信息密度——警告阈值（fallback 默认值，实际由 ProfileConfig 覆盖） */
+export const GATE_WARN_DENSITY = 0.50;
 
-/** 信息密度——硬阻断阈值 */
-export const GATE_MIN_DENSITY = 0.1;
+/** 信息密度——硬阻断阈值（fallback 默认值，实际由 ProfileConfig 覆盖） */
+export const GATE_MIN_DENSITY = 0.15;
 
 /** 噪声占比——警告阈值 */
 export const GATE_WARN_NOISE_RATIO = 0.4;

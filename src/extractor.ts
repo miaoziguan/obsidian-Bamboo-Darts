@@ -9,7 +9,58 @@
  */
 
 import { requestUrl, Vault } from 'obsidian';
-import { runGateChecks } from './utils/gate-rules';
+import { runGateChecks } from './gate';
+import { parseAINoteOutput, AtomicNote, validateAtomicNote, ensureTags } from './utils/notes-standards';
+import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult, DuplicateInfo } from './deduplicator';
+import { buildSystemPrompt, buildExtractionPrompt } from './extraction/tag-preferences';
+import { classifyContent, resolveProfileConfig, PROFILE_LABELS, ContentProfile, ProfileConfig } from './extraction/profiles';
+import { verifyClaims } from './extraction/fact-checker';
+import { reviewNotes, ReviewConfig } from './review/note-reviewer';
+import { extractUrlContent } from './extraction/url-extractor';
+import { extractChunked } from './extraction/chunked-extractor';
+import { AI_TEMPERATURE, INPUT_TRUNCATE_LENGTH } from './constants';
+import { ProgressCallback, ProgressEvent, createProgressTracker, ProgressTracker } from './extraction/progress';
+
+/** 笔记内容指纹（用于稳定映射，不依赖标题或对象引用） */
+function noteFingerprint(note: AtomicNote): string {
+  return `${note.content.length}:${note.content.slice(0, 100)}`;
+}
+
+/**
+ * 重映射 vaultDedupPending 的 newNoteIndex
+ * 过滤笔记后，pending 笔记在新数组中的位置可能变化，需要更新索引。
+ * 使用内容指纹匹配，避免标题冲突。
+ */
+function remapPendingDuplicates(
+  notes: AtomicNote[],
+  pending: PendingDuplicate[],
+): PendingDuplicate[] {
+  const postIndexMap = new Map<string, number>();
+  notes.forEach((note, idx) => postIndexMap.set(noteFingerprint(note), idx));
+
+  return pending
+    .filter(p => {
+      const key = `${p.newNoteContent.length}:${p.newNoteContent.slice(0, 100)}`;
+      return postIndexMap.has(key);
+    })
+    .map(p => {
+      const key = `${p.newNoteContent.length}:${p.newNoteContent.slice(0, 100)}`;
+      return { ...p, newNoteIndex: postIndexMap.get(key)! };
+    });
+}
+
+/** 取消检查：若已取消，标记 tracker 并返回结果；否则返回 null */
+function checkAborted(
+  signal: AbortSignal | undefined,
+  tracker: ProgressTracker,
+): ExtractionResult | null {
+  if (signal?.aborted) {
+    tracker.fail('已取消');
+    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
+  }
+  return null;
+}
+import { runGateChecks } from './gate';
 import { parseAINoteOutput, AtomicNote, validateAtomicNote, ensureTags } from './utils/notes-standards';
 import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult, DuplicateInfo } from './deduplicator';
 import { buildSystemPrompt, buildExtractionPrompt } from './extraction/tag-preferences';
@@ -47,6 +98,8 @@ export interface ExtractorConfig {
   profileConfigs?: Partial<Record<ContentProfile, Partial<ProfileConfig>>>;
   // 深度提炼
   enableDeepMode?: boolean;
+  // 跳过了门控（强制提炼）
+  skipGate?: boolean;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
@@ -127,15 +180,15 @@ async function readContent(
   } else if (input.type === 'selection') {
     // 选中文本
     const content = input.content;
-    if (!content || content.trim().length < 50) {
-      return { success: false, error: '选中文本过短（至少需要 50 字）' };
+    if (!content || content.trim().length === 0) {
+      return { success: false, error: '未选中任何文本内容' };
     }
     return { success: true, content, type: 'text' };
   } else {
     // 纯文本
     const content = input.content;
-    if (!content || content.trim().length < 100) {
-      return { success: false, error: '文本过短（至少需要 100 字）' };
+    if (!content || content.trim().length === 0) {
+      return { success: false, error: '未输入任何文本内容' };
     }
     return { success: true, content, type: 'text' };
   }
@@ -243,6 +296,9 @@ export interface ExtractionResult {
   notes?: AtomicNote[];
   steps: Step[];
   error?: string;
+  gateWarnings?: string[];
+  /** 是否因质量门控被阻断（用于上层决定是否提供强制提炼选项） */
+  gateBlocked?: boolean;
   detectedProfile?: ContentProfile;
   profileSource?: 'auto' | 'manual';
   crossBatchDuplicates?: DuplicateInfo[];
@@ -291,22 +347,7 @@ export async function runExtraction(
     ? content.slice(0, INPUT_TRUNCATE_LENGTH)
     : content;
 
-  // Phase 2: 质量门控
-  tracker.start('Phase 2', '质量门控', '开始检查...');
-  const gateResult = runGateChecks(content);
-
-  if (!gateResult.passed) {
-    tracker.fail(gateResult.reasons.join('; '));
-    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: gateResult.reasons.join('; ') };
-  }
-
-  if (gateResult.warnings.length > 0) {
-    tracker.complete(`通过（${gateResult.warnings.length} 条提醒）`);
-  } else {
-    tracker.complete('通过');
-  }
-
-  // Profile 分类：自动判断或手动指定
+  // Profile 分类：自动判断或手动指定（纯规则，零 API 调用，提前到门控之前）
   let detectedProfile: ContentProfile;
   let profileSource: 'auto' | 'manual';
 
@@ -314,7 +355,7 @@ export async function runExtraction(
     detectedProfile = fullConfig.profile;
     profileSource = 'manual';
   } else if (fullConfig.autoClassify !== false) {
-    detectedProfile = classifyContent(content);
+    detectedProfile = classifyContent(truncatedContent);
     profileSource = 'auto';
   } else {
     detectedProfile = 'balanced';
@@ -322,6 +363,37 @@ export async function runExtraction(
   }
 
   const activeProfileConfig = resolveProfileConfig(detectedProfile, fullConfig.profileConfigs);
+
+  // Phase 2: 质量门控（使用 Profile 差异化阈值，skipGate 时跳过）
+  let gateResult: { passed: boolean; summary: string; reasons: string[]; warnings: string[] } = {
+    passed: true, summary: '', reasons: [], warnings: [],
+  };
+
+  if (!fullConfig.skipGate) {
+    tracker.start('Phase 2', '质量门控', '开始检查...');
+    gateResult = runGateChecks(truncatedContent, [], activeProfileConfig);
+
+    if (!gateResult.passed) {
+      tracker.fail(gateResult.summary);
+      return { success: false, steps: eventsToSteps(tracker.allEvents()), error: gateResult.summary, gateBlocked: true };
+    }
+
+    if (gateResult.warnings.length > 0) {
+      tracker.complete(`通过（${gateResult.warnings.length} 条提醒：${gateResult.warnings[0]}${gateResult.warnings.length > 1 ? '...' : ''}）`);
+    } else {
+      tracker.complete('通过');
+    }
+  } else {
+    // 强制提炼：仍运行门控检查（不阻断），收集警告供 ResultModal 展示
+    tracker.start('Phase 2', '质量门控', '已跳过阻断（强制提炼）');
+    gateResult = runGateChecks(truncatedContent, [], activeProfileConfig);
+    if (gateResult.warnings.length > 0) {
+      tracker.complete(`跳过门控，但检测到 ${gateResult.warnings.length} 条质量提醒`);
+    } else {
+      tracker.skip('用户选择强制提炼（无质量警告）');
+    }
+  }
+
   tracker.complete(`策略: ${PROFILE_LABELS[detectedProfile]} (${profileSource === 'auto' ? '自动检测' : '手动指定'})`);
 
   // Phase 3: 提炼原子笔记（AI 模式 / 深度模式）
@@ -359,9 +431,9 @@ export async function runExtraction(
   }
 
   // 取消检查点（Phase 4 → 4b）
-  if (fullConfig.signal?.aborted) {
-    tracker.fail('已取消');
-    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
+  {
+    const r = checkAborted(fullConfig.signal, tracker);
+    if (r) return r;
   }
 
   // Phase 4b: 知识库去重（可选）
@@ -428,9 +500,9 @@ export async function runExtraction(
   }
 
   // 取消检查点（Phase 4b → 5）
-  if (fullConfig.signal?.aborted) {
-    tracker.fail('已取消');
-    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
+  {
+    const r = checkAborted(fullConfig.signal, tracker);
+    if (r) return r;
   }
 
   // Phase 5: 内容核查（可选）—— 三层管线：原文溯源 → 语义比对 → 超源标记
@@ -451,36 +523,18 @@ export async function runExtraction(
     if (verifyResult.error) {
       tracker.fail(`核查出错: ${verifyResult.error}`);
     } else {
-      if (fullConfig.verifiedOnly) {
-        const originalCount = notes.length;
-        // Phase 5 过滤后，重新映射 vaultDedupPending 的索引
-        const preFilterNotes = notes; // 过滤前的笔记数组
-        const preFilterPendingIndices = new Map<string, number>(); // 标题 → 过滤前索引
-        preFilterNotes.forEach((note, idx) => preFilterPendingIndices.set(note.title, idx));
+        if (fullConfig.verifiedOnly) {
+          const originalCount = notes.length;
+          notes = notes.filter(note => {
+            const v = note.verification;
+            if (!v || v.length === 0) return true;
+            return !v.some(r => r.status === '超源');
+          });
 
-        notes = notes.filter(note => {
-          const v = note.verification;
-          if (!v || v.length === 0) return true;
-          return !v.some(r => r.status === '超源');
-        });
+          // 使用内容指纹重映射 vaultDedupPending 的索引
+          vaultDedupPending = remapPendingDuplicates(notes, vaultDedupPending);
 
-        // 基于标题重建新数组中的索引映射
-        const postFilterIndexMap = new Map<string, number>(); // 标题 → 过滤后索引
-        notes.forEach((note, idx) => postFilterIndexMap.set(note.title, idx));
-
-        // 重映射 vaultDedupPending 中的 newNoteIndex
-        vaultDedupPending = vaultDedupPending
-          .filter(p => {
-            // 只有同时存在于过滤前后才保留
-            const preIdx = preFilterPendingIndices.get(p.newNoteTitle);
-            return preIdx !== undefined && postFilterIndexMap.has(p.newNoteTitle);
-          })
-          .map(p => ({
-            ...p,
-            newNoteIndex: postFilterIndexMap.get(p.newNoteTitle)!,
-          }));
-
-        tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}（过滤超源：${originalCount} → ${notes.length}）`);
+          tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}（过滤超源：${originalCount} → ${notes.length}）`);
       } else {
         tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}`);
       }
@@ -491,9 +545,9 @@ export async function runExtraction(
   }
 
   // 取消检查点（Phase 5 → 6）
-  if (fullConfig.signal?.aborted) {
-    tracker.fail('已取消');
-    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
+  {
+    const r = checkAborted(fullConfig.signal, tracker);
+    if (r) return r;
   }
 
   // Phase 6: 笔记复查（可选）
@@ -514,18 +568,8 @@ export async function runExtraction(
     // 使用复查后的笔记（若复查失败，reviewNotes 内部已降级返回原始笔记）
     const filteredCount = notes.length - reviewResult.reviewedNotes.length;
 
-    // Phase 6 复查后，重新映射 vaultDedupPending 的索引
-    const preReviewPendingTitles = new Set(vaultDedupPending.map(p => p.newNoteTitle));
-    const postReviewIndexMap = new Map<string, number>(); // 标题 → 复查后索引
-    reviewResult.reviewedNotes.forEach((note, idx) => postReviewIndexMap.set(note.title, idx));
-
-    // 过滤并重映射
-    vaultDedupPending = vaultDedupPending
-      .filter(p => postReviewIndexMap.has(p.newNoteTitle))
-      .map(p => ({
-        ...p,
-        newNoteIndex: postReviewIndexMap.get(p.newNoteTitle)!,
-      }));
+    // 使用内容指纹重映射 vaultDedupPending 的索引
+    vaultDedupPending = remapPendingDuplicates(notes, vaultDedupPending);
 
     notes = reviewResult.reviewedNotes;
 
@@ -570,6 +614,7 @@ export async function runExtraction(
     success: true,
     notes,
     steps: eventsToSteps(tracker.allEvents()),
+    gateWarnings: gateResult.warnings.length > 0 ? gateResult.warnings : undefined,
     detectedProfile,
     profileSource,
     crossBatchDuplicates: dedupResult.duplicates.length > 0 ? dedupResult.duplicates : undefined,

@@ -7,6 +7,8 @@
 
 // ─── 类型定义 ───
 
+import { STOP_WORDS } from '../constants';
+
 export type ContentProfile = 'dense' | 'balanced' | 'sparse';
 
 export interface ProfileConfig {
@@ -18,6 +20,50 @@ export interface ProfileConfig {
   vaultMidThreshold: number;
   /** Phase 6: 质量审查最低分（低于此分丢弃） */
   reviewMinScore: number;
+  /** Phase 2: 信息密度硬阻断阈值 */
+  gateMinDensity: number;
+  /** Phase 2: 信息密度警告阈值 */
+  gateWarnDensity: number;
+  /** Phase 2: 噪声占比硬阻断阈值 */
+  gateMaxNoiseRatio: number;
+  /** Phase 2: 噪声占比警告阈值 */
+  gateWarnNoiseRatio: number;
+  /** Phase 2: 内容最短长度——硬阻断（字符数） */
+  gateMinLength: number;
+  /** Phase 2: 内容最短长度——警告阈值（字符数） */
+  gateWarnLength: number;
+  /** Phase 2: 内容最长长度——硬阻断（字符数，0=不限制） */
+  gateMaxLength: number;
+  /** Phase 2: 内容最长长度——警告阈值（字符数） */
+  gateWarnLength: number;
+  /** Phase 2: 链接占比阻断阈值（0-1） */
+  gateLinkBlockRatio: number;
+  /** Phase 2: 链接密度阻断阈值（个/百字） */
+  gateLinkBlockDensity: number;
+  /** Phase 2: 低质量信号命中数——硬阻断 */
+  gateQualityBlockCount: number;
+  /** Phase 2: 低质量信号命中数——警告 */
+  gateQualityWarnCount: number;
+  /** Phase 2: 关键词堆砌阻断阈值（出现率/百字） */
+  gateKeywordStuffingBlockRate: number;
+  /** Phase 2: 关键词堆砌警告阈值（出现率/百字） */
+  gateKeywordStuffingWarnRate: number;
+  /** Phase 2: 关键词堆砌最短内容长度（字符数） */
+  gateKeywordStuffingMinLength: number;
+  /** Phase 2: 关键词堆砌最小出现次数 */
+  gateKeywordStuffingMinCount: number;
+  /** Phase 2: 关键词堆砌检测 Top-N（取频率最高的 N 个 token） */
+  gateKeywordStuffingTopN: number;
+  /** Phase 2: 重复内容阻断阈值（相似度 0-1） */
+  gateDuplicateThreshold: number;
+  /** Phase 2: HTML 残留阻断阈值（标记个数） */
+  gateHtmlBlockCount: number;
+  /** Phase 2: HTML 残留警告阈值（标记个数） */
+  gateHtmlWarnCount: number;
+  /** Phase 2: 乱码阻断阈值（命中个数） */
+  gateMojibakeBlockCount: number;
+  /** Phase 2: 乱码警告阈值（命中个数） */
+  gateMojibakeWarnCount: number;
 }
 
 // ─── 默认策略参数 ───
@@ -28,18 +74,100 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     vaultHighThreshold: 0.80,
     vaultMidThreshold: 0.65,
     reviewMinScore: 2,
+    gateMinDensity: 0.15,
+    gateWarnDensity: 0.50,
+    gateMaxNoiseRatio: 0.75,
+    gateWarnNoiseRatio: 0.45,
+    // 技术文档允许更短（代码片段、定义等）
+    gateMinLength: 50,
+    gateWarnLength: 150,
+    // 技术文档可以很长（完整技术手册）
+    gateMaxLength: 100000,
+    gateWarnMaxLength: 50000,
+    // 技术文档可以有更多链接（参考资料）
+    gateLinkBlockRatio: 0.55,
+    gateLinkBlockDensity: 1.5,
+    // 技术文档对广告词容忍度低
+    gateQualityBlockCount: 2,
+    gateQualityWarnCount: 1,
+    // 技术文档允许更高关键词重复（专业术语高频出现）
+    gateKeywordStuffingBlockRate: 5.0,
+    gateKeywordStuffingWarnRate: 3.0,
+    gateKeywordStuffingMinLength: 300,
+    gateKeywordStuffingMinCount: 8,
+    gateKeywordStuffingTopN: 8,
+    // 技术文档允许更高相似度（同一技术主题的不同文章可能有重叠）
+    gateDuplicateThreshold: 0.6,
+    // HTML 残留、乱码阈值与通用一致
+    gateHtmlBlockCount: 5,
+    gateHtmlWarnCount: 2,
+    gateMojibakeBlockCount: 3,
+    gateMojibakeWarnCount: 1,
   },
   balanced: {
     crossBatchThreshold: 0.65,
     vaultHighThreshold: 0.70,
     vaultMidThreshold: 0.55,
     reviewMinScore: 3,
+    gateMinDensity: 0.15,
+    gateWarnDensity: 0.50,
+    gateMaxNoiseRatio: 0.70,
+    gateWarnNoiseRatio: 0.40,
+    // 通用文章默认阈值
+    gateMinLength: 80,
+    gateWarnLength: 300,
+    // 通用文章建议不超过 50000 字
+    gateMaxLength: 50000,
+    gateWarnMaxLength: 20000,
+    gateLinkBlockRatio: 0.40,
+    gateLinkBlockDensity: 1.0,
+    gateQualityBlockCount: 3,
+    gateQualityWarnCount: 1,
+    // 通用文章默认阈值
+    gateKeywordStuffingBlockRate: 3.0,
+    gateKeywordStuffingWarnRate: 1.5,
+    gateKeywordStuffingMinLength: 200,
+    gateKeywordStuffingMinCount: 5,
+    gateKeywordStuffingTopN: 5,
+    gateDuplicateThreshold: 0.5,
+    gateHtmlBlockCount: 5,
+    gateHtmlWarnCount: 2,
+    gateMojibakeBlockCount: 3,
+    gateMojibakeWarnCount: 1,
   },
   sparse: {
     crossBatchThreshold: 0.55,
     vaultHighThreshold: 0.60,
     vaultMidThreshold: 0.45,
     reviewMinScore: 4,
+    gateMinDensity: 0.15,
+    gateWarnDensity: 0.50,
+    gateMaxNoiseRatio: 0.65,
+    gateWarnNoiseRatio: 0.35,
+    // 观点/评论允许更短（一句话观点也有价值）
+    gateMinLength: 30,
+    gateWarnLength: 100,
+    // 观点文章不宜过长
+    gateMaxLength: 20000,
+    gateWarnMaxLength: 10000,
+    // 观点文章链接不多
+    gateLinkBlockRatio: 0.35,
+    gateLinkBlockDensity: 0.8,
+    // 观点文章对广告容忍度较高（自媒体常带推广）
+    gateQualityBlockCount: 5,
+    gateQualityWarnCount: 2,
+    // 观点文章对关键词重复更敏感（营销号常堆砌）
+    gateKeywordStuffingBlockRate: 2.0,
+    gateKeywordStuffingWarnRate: 1.0,
+    gateKeywordStuffingMinLength: 150,
+    gateKeywordStuffingMinCount: 3,
+    gateKeywordStuffingTopN: 5,
+    // 观点文章对重复更敏感
+    gateDuplicateThreshold: 0.4,
+    gateHtmlBlockCount: 5,
+    gateHtmlWarnCount: 2,
+    gateMojibakeBlockCount: 3,
+    gateMojibakeWarnCount: 1,
   },
 };
 
@@ -89,13 +217,6 @@ function countCodeBlocks(text: string): number {
 /** 技术术语密度：英文词 + 斜杠分隔术语，每千字 */
 function technicalTermDensity(text: string): number {
   const charCount = text.length || 1;
-  // 连续英文字母词（≥3 字母，排除常见停用词）
-  const STOP_WORDS = new Set([
-    'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
-    'her', 'was', 'one', 'our', 'out', 'has', 'have', 'this', 'that', 'with',
-    'from', 'they', 'been', 'said', 'each', 'which', 'their', 'will', 'other',
-    'about', 'many', 'then', 'them', 'these', 'some', 'would', 'into', 'more',
-  ]);
   const englishWords = text.match(/\b[a-zA-Z]{3,}\b/g) || [];
   const filteredEnglish = englishWords.filter(w => !STOP_WORDS.has(w.toLowerCase()));
 
