@@ -353,7 +353,7 @@ export class AtomicNotesPanel extends ItemView {
     el.createEl('div', { text: '处理流程', attr: { style: sectionStyle } });
     const phases = [
       ['Phase 1', '读取内容', '从文本、URL 或剪贴板获取原始内容'],
-      ['Phase 2', '质量门控', '5 层规则前置过滤低质/噪声内容，硬拦+软警告'],
+      ['Phase 2', '质量门控', '9 层规则前置过滤低质/噪声内容，硬拦+软警告'],
       ['Phase 3', 'AI 提炼', '调用 DeepSeek 将内容拆解为原子笔记'],
       ['Phase 4', '同批去重', 'TF-IDF + 余弦相似度，检测同批次高度相似笔记'],
       ['Phase 4b', '知识库去重', '与目标文件夹已有笔记比对，严格不跨目录读取'],
@@ -386,7 +386,7 @@ export class AtomicNotesPanel extends ItemView {
       attr: { style: textStyle + ';padding-left:10px' },
     });
     el.createEl('p', {
-      text: '知识库去重严格只读取目标文件夹内容，不会扫描知识库其他区域。可在设置中独立指定"去重目标文件夹"。',
+      text: '知识库去重严格只读取目标文件夹内容，不会扫描知识库其他区域。',
       attr: { style: textStyle },
     });
 
@@ -414,9 +414,13 @@ export class AtomicNotesPanel extends ItemView {
     el.createEl('div', { text: '质量门控', attr: { style: sectionStyle } });
     const gateRules = [
       ['长度', '< 50 字', '50-200 字 / > 50000 字'],
-      ['广告/低质', '≥ 3 个关键词', '1-2 个关键词'],
       ['信息密度', '< 10%（严重重复）', '< 30%（疑似水文）'],
       ['噪声占比', '> 70%（乱码残留）', '> 40%'],
+      ['HTML 标签', '占比 > 60%', '占比 > 30%'],
+      ['乱码残留', '非文字字符 > 70%', '非文字字符 > 50%'],
+      ['链接堆砌', '导航分隔符 > 3 组', '1-2 组'],
+      ['广告/低质', '≥ 3 个关键词', '1-2 个关键词'],
+      ['质量评分', '≤ 1 分（垃圾）', '2 分（存疑）'],
       ['重复检测', '> 50% 相似度', '—'],
     ];
     const gateHeader = el.createEl('div', { attr: { style: 'display:flex;gap:8px;padding:2px 0;font-size:11px;color:var(--text-faint)' } });
