@@ -280,6 +280,7 @@ export default class AtomicNotesPlugin extends Plugin {
         signal: this._abortController.signal,
         vault: this.app.vault,
         targetFolder: this.settings.targetFolder,
+        dedupTargetFolder: this.settings.dedupTargetFolder,
         enableVaultDedup: true,
         onProgress: progressCb,
         // Profile 过滤策略

@@ -347,6 +347,7 @@ var DEFAULT_SETTINGS = {
   model: "deepseek-v4-flash",
   maxTokens: 6e3,
   targetFolder: "Atomic Notes",
+  dedupTargetFolder: "",
   fileNameTemplate: "{{title}}",
   autoSave: false,
   tagPreferences: [],
@@ -426,6 +427,12 @@ var AtomicNotesSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("\u76EE\u6807\u6587\u4EF6\u5939").setDesc("\u539F\u5B50\u7B14\u8BB0\u4FDD\u5B58\u7684\u6587\u4EF6\u5939\uFF08\u9ED8\u8BA4\uFF1AAtomic Notes\uFF09").addText(
       (text) => text.setValue(this.plugin.settings.targetFolder).onChange(async (value) => {
         this.plugin.settings.targetFolder = value.trim() || "Atomic Notes";
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u53BB\u91CD\u76EE\u6807\u6587\u4EF6\u5939").setDesc("\u53BB\u91CD\u6BD4\u5BF9\u65F6\u8BFB\u53D6\u7684\u6587\u4EF6\u5939\u3002\u7559\u7A7A\u5219\u590D\u7528\u300C\u76EE\u6807\u6587\u4EF6\u5939\u300D\uFF0C\u9002\u5408\u6709\u9690\u79C1\u9700\u6C42\u7684\u7528\u6237\u9650\u5236\u53BB\u91CD\u8303\u56F4\u3002").addText(
+      (text) => text.setPlaceholder("\u7559\u7A7A = \u590D\u7528\u76EE\u6807\u6587\u4EF6\u5939").setValue(this.plugin.settings.dedupTargetFolder).onChange(async (value) => {
+        this.plugin.settings.dedupTargetFolder = value.trim();
         await this.plugin.saveSettings();
       })
     );
@@ -2880,7 +2887,7 @@ async function runExtraction(input, config = {}) {
     const matchInfos = await checkAgainstVaultDetailed(
       fullConfig.vault,
       notes,
-      fullConfig.targetFolder || ""
+      fullConfig.dedupTargetFolder?.trim() || fullConfig.targetFolder || ""
     );
     const HIGH_SIM_THRESHOLD = activeProfileConfig.vaultHighThreshold;
     const MID_SIM_THRESHOLD = activeProfileConfig.vaultMidThreshold;
@@ -4153,7 +4160,7 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
       attr: { style: textStyle + ";padding-left:10px" }
     });
     el.createEl("p", {
-      text: "\u77E5\u8BC6\u5E93\u53BB\u91CD\u4E25\u683C\u53EA\u8BFB\u53D6\u76EE\u6807\u6587\u4EF6\u5939\u5185\u5BB9\uFF0C\u4E0D\u4F1A\u626B\u63CF\u77E5\u8BC6\u5E93\u5176\u4ED6\u533A\u57DF\u3002",
+      text: '\u77E5\u8BC6\u5E93\u53BB\u91CD\u9ED8\u8BA4\u8BFB\u53D6\u76EE\u6807\u6587\u4EF6\u5939\u5185\u5BB9\uFF0C\u53EF\u5728\u8BBE\u7F6E\u4E2D\u72EC\u7ACB\u6307\u5B9A"\u53BB\u91CD\u76EE\u6807\u6587\u4EF6\u5939"\uFF0C\u9002\u5408\u6709\u9690\u79C1\u9700\u6C42\u7528\u6237\u9650\u5236\u53BB\u91CD\u8303\u56F4\u3002',
       attr: { style: textStyle }
     });
     el.createEl("div", { text: "\u5B9E\u65F6\u8FDB\u5EA6\u53CD\u9988", attr: { style: sectionStyle } });
@@ -4768,6 +4775,7 @@ var AtomicNotesPlugin = class extends import_obsidian10.Plugin {
         signal: this._abortController.signal,
         vault: this.app.vault,
         targetFolder: this.settings.targetFolder,
+        dedupTargetFolder: this.settings.dedupTargetFolder,
         enableVaultDedup: true,
         onProgress: progressCb,
         // Profile 过滤策略

@@ -89,6 +89,8 @@ export interface ExtractorConfig {
   // 知识库去重相关
   vault?: Vault;
   targetFolder?: string;
+  /** 去重比对专用文件夹，留空则复用 targetFolder */
+  dedupTargetFolder?: string;
   enableVaultDedup?: boolean;
   // 进度回调
   onProgress?: ProgressCallback;
@@ -446,7 +448,7 @@ export async function runExtraction(
     const matchInfos: VaultMatchInfo[] = await checkAgainstVaultDetailed(
       fullConfig.vault,
       notes,
-      fullConfig.targetFolder || ''
+      fullConfig.dedupTargetFolder?.trim() || fullConfig.targetFolder || ''
     );
 
     // 使用 Profile 策略的阈值

@@ -386,7 +386,7 @@ export class AtomicNotesPanel extends ItemView {
       attr: { style: textStyle + ';padding-left:10px' },
     });
     el.createEl('p', {
-      text: '知识库去重严格只读取目标文件夹内容，不会扫描知识库其他区域。',
+      text: '知识库去重默认读取目标文件夹内容，可在设置中独立指定"去重目标文件夹"，适合有隐私需求用户限制去重范围。',
       attr: { style: textStyle },
     });
 

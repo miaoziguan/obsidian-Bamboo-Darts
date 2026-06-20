@@ -21,6 +21,8 @@ export interface PluginSettings {
 
   // Storage
   targetFolder: string;
+  /** 去重比对专用文件夹，留空则复用 targetFolder */
+  dedupTargetFolder: string;
   fileNameTemplate: string;
   autoSave: boolean;
 
@@ -68,6 +70,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   model: 'deepseek-v4-flash',
   maxTokens: 6000,
   targetFolder: 'Atomic Notes',
+  dedupTargetFolder: '',
   fileNameTemplate: '{{title}}',
   autoSave: false,
   tagPreferences: [],
@@ -204,6 +207,19 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.targetFolder)
           .onChange(async value => {
             this.plugin.settings.targetFolder = value.trim() || 'Atomic Notes';
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('去重目标文件夹')
+      .setDesc('去重比对时读取的文件夹。留空则复用「目标文件夹」，适合有隐私需求的用户限制去重范围。')
+      .addText(text =>
+        text
+          .setPlaceholder('留空 = 复用目标文件夹')
+          .setValue(this.plugin.settings.dedupTargetFolder)
+          .onChange(async value => {
+            this.plugin.settings.dedupTargetFolder = value.trim();
             await this.plugin.saveSettings();
           })
       );
