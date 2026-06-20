@@ -88,6 +88,10 @@ AI 从两个维度对每条笔记打分（1-5 分）：
 - `Bamboo Darts: 从选中文本提炼原子笔记`
 - `Bamboo Darts: 从 URL 提炼原子笔记`
 - `Bamboo Darts: 从剪贴板提炼原子笔记`
+- `Bamboo Darts: 打开面板 - 右侧栏`
+- `Bamboo Darts: 打开面板 - 左侧栏`
+- `Bamboo Darts: 打开面板 - 新标签页`
+- `Bamboo Darts: 打开面板 - 分屏`
 
 #### 右键菜单
 
@@ -257,6 +261,10 @@ Notes with total score < 3 are automatically filtered out. This is the final qua
 - `Bamboo Darts: Extract atomic notes from selected text`
 - `Bamboo Darts: Extract atomic notes from URL`
 - `Bamboo Darts: Extract atomic notes from clipboard`
+- `Bamboo Darts: Open Panel - Right Sidebar`
+- `Bamboo Darts: Open Panel - Left Sidebar`
+- `Bamboo Darts: Open Panel - New Tab`
+- `Bamboo Darts: Open Panel - Split`
 
 #### Context Menu
 
