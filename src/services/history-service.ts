@@ -3,7 +3,19 @@
  * 从 main.js 中反混淆而来：extractionHistory, _srchs (SHA256 hash), _srcti (source title)
  */
 
-import { createHash } from 'crypto';
+/**
+ * FNV-1a 32位哈希：浏览器兼容的内容指纹
+ * 用于提炼历史去重，不需要密码学安全
+ */
+function fnv1aHash(str: string): string {
+  let hash = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0; // FNV prime, >>> 0 确保无符号
+  }
+  // 转为16进制字符串，补零到8位
+  return hash.toString(16).padStart(8, '0');
+}
 
 export interface ExtractionHistoryEntry {
   sourceHash: string;
@@ -17,9 +29,9 @@ export interface ExtractionHistoryEntry {
 /** Maximum number of history entries to keep */
 const MAX_HISTORY_SIZE = 50;
 
-/** Compute SHA256 hash for source content deduplication */
+/** 计算内容指纹哈希（FNV-1a，用于去重判断） */
 export function computeSourceHash(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
+  return fnv1aHash(content);
 }
 
 /** Generate a short title for the extraction source */

@@ -29,10 +29,8 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
   }
 }
 
-/**
- * 生成文件名
- */
-function generateFileName(template: string, note: AtomicNote): string {
+/** 生成文件名（@internal 暴露给测试） */
+export function generateFileName(template: string, note: AtomicNote): string {
   const safeTemplate = template || '{{title}}';
   // Bug #11 修复：使用同一个 Date 对象，避免午夜时间不一致
   const now = new Date();
@@ -52,10 +50,8 @@ function generateFileName(template: string, note: AtomicNote): string {
   return fileName;
 }
 
-/**
- * 清理文件名（去掉非法字符）
- */
-function sanitizeFileName(name: string): string {
+/** 清理文件名（去掉非法字符）（@internal 暴露给测试） */
+export function sanitizeFileName(name: string): string {
   const sanitized = name
     .replace(/[\\/:*?"<>|#^[\]]/g, '-')
     .replace(/\s+/g, ' ')
@@ -65,10 +61,8 @@ function sanitizeFileName(name: string): string {
   return sanitized || `note-${Date.now()}`;
 }
 
-/**
- * Bug #9 修复：转义 YAML frontmatter 中的特殊字符
- */
-function escapeYamlValue(value: string): string {
+/** Bug #9 修复：转义 YAML frontmatter 中的特殊字符（@internal 暴露给测试） */
+export function escapeYamlValue(value: string): string {
   // 如果值包含 YAML 特殊字符，用双引号包裹并转义内部引号
   if (/[:\[\]{}#&*!|>'"%@`,?\\]/.test(value)) {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -76,10 +70,8 @@ function escapeYamlValue(value: string): string {
   return value;
 }
 
-/**
- * 将原子笔记格式化为 Markdown
- */
-function formatNoteAsMarkdown(note: AtomicNote): string {
+/** 将原子笔记格式化为 Markdown（@internal 暴露给测试） */
+export function formatNoteAsMarkdown(note: AtomicNote): string {
   const lines: string[] = [];
   
   // YAML frontmatter（Bug #9 修复：转义特殊字符）

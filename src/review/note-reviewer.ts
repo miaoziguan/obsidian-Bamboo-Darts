@@ -19,14 +19,15 @@ export interface ReviewConfig {
   model: string;
   maxTokens: number;
   signal?: AbortSignal;
+  minScore?: number;
 }
 
 interface ReviewResult {
   index: number;        // 笔记序号（0-based）
   insightScore: number;  // 洞见价值得分（1-5）
   knowledgeScore: number;// 知识价值得分（1-5）
-  dataAccuracyScore?: number; // 数据准确性得分（1-5，可选）
-  finalScore: number;   // 最终得分 = (insight + knowledge [+ dataAccuracy]) / N
+  sourceTraceScore?: number; // 溯源可信度得分（1-5，可选）
+  finalScore: number;   // 最终得分 = (insight + knowledge [+ sourceTrace]) / N
   verdict: '保留' | '丢弃';
   reason: string;       // AI 给出的简短理由
 }
@@ -46,7 +47,8 @@ export async function reviewNotes(
     return { reviewedNotes: [], reviewDetails: [], success: true };
   }
 
-  const prompt = buildReviewPrompt(notes);
+  const minScore = config.minScore ?? 3;
+  const prompt = buildReviewPrompt(notes, minScore);
 
   try {
     const response = await requestUrl({
@@ -75,7 +77,7 @@ export async function reviewNotes(
     });
 
     const aiContent = response.json?.choices?.[0]?.message?.content || '';
-    const reviewDetails = parseReviewOutput(aiContent, notes.length);
+    const reviewDetails = parseReviewOutput(aiContent, notes.length, minScore);
 
     const kept = reviewDetails
       .filter(r => r.verdict === '保留')
@@ -104,32 +106,32 @@ export async function reviewNotes(
 /**
  * 构建复查 Prompt
  */
-function buildReviewPrompt(notes: AtomicNote[]): string {
-  const hasDataCheck = notes.some(n => n.dataCheck && n.dataCheck.length > 0);
+function buildReviewPrompt(notes: AtomicNote[], minScore: number): string {
+  const hasVerification = notes.some(n => n.verification && n.verification.length > 0);
 
-  let prompt = `你是严格的笔记审查员。对以下每条原子笔记，从${hasDataCheck ? '三' : '两'}个维度评分（1-5分）：
+  let prompt = `你是严格的笔记审查员。对以下每条原子笔记，从${hasVerification ? '三' : '两'}个维度评分（1-5分）：
 
 1. 洞见价值：是否包含独立见解/反直觉判断？
 2. 知识价值：是否学到新的领域知识？
 `;
 
-  if (hasDataCheck) {
-    prompt += `3. 数据准确性：笔记中的数字、日期、统计等数据是否可信？
+  if (hasVerification) {
+    prompt += `3. 溯源可信度：笔记中的声明是否能在原文中找到依据？
 `;
   }
 
   prompt += `
 评分标准：
-5分：同时具备洞见价值和知识价值${hasDataCheck ? '，数据完全可信' : ''}
-4分：具备其中一项，且质量很高${hasDataCheck ? '，数据基本可信' : ''}
-3分：具备其中一项，但较浅${hasDataCheck ? '，数据有待验证' : ''}
-2分：正确的废话，无独立见解，无知识增量${hasDataCheck ? '，数据存在明显偏差' : ''}
-1分：垃圾笔记（重复/无关/无信息量）${hasDataCheck ? '，数据严重失实' : ''}
+5分：同时具备洞见价值和知识价值${hasVerification ? '，声明全部可溯源' : ''}
+4分：具备其中一项，且质量很高${hasVerification ? '，声明基本可溯源' : ''}
+3分：具备其中一项，但较浅${hasVerification ? '，部分声明需对比确认' : ''}
+2分：正确的废话，无独立见解，无知识增量${hasVerification ? '，存在超源声明' : ''}
+1分：垃圾笔记（重复/无关/无信息量）${hasVerification ? '，大量超源声明' : ''}
 
 `;
 
-  if (hasDataCheck) {
-    prompt += `计算最终得分：final_score = (insight_score + knowledge_score + data_accuracy_score) / 3
+  if (hasVerification) {
+    prompt += `计算最终得分：final_score = (insight_score + knowledge_score + source_trace_score) / 3
 
 `;
   } else {
@@ -138,7 +140,7 @@ function buildReviewPrompt(notes: AtomicNote[]): string {
 `;
   }
 
-  prompt += `最终得分 < 3 的笔记 verdict 填"丢弃"；最终得分 ≥ 3 的笔记 verdict 填"保留"。
+  prompt += `最终得分 < ${minScore} 的笔记 verdict 填"丢弃"；最终得分 ≥ ${minScore} 的笔记 verdict 填"保留"。
 
 请以 JSON 数组格式输出每条笔记的评分结果（不要输出笔记正文，不要修改笔记内容）：
 
@@ -152,21 +154,31 @@ function buildReviewPrompt(notes: AtomicNote[]): string {
     prompt += `content: ${preview}${note.content.length > 150 ? '...' : ''}\n`;
     prompt += `tags: [${note.tags?.join(', ') || ''}]\n`;
 
-    // 附加数据核查结果供复查参考
-    if (hasDataCheck && note.dataCheck && note.dataCheck.length > 0) {
-      const deviations = note.dataCheck.filter(d => d.status === '偏差');
-      if (deviations.length > 0) {
-        prompt += `data_check: 发现 ${deviations.length} 处数据偏差：${deviations.map(d => `"${d.claim}"`).join('; ')}\n`;
+    // 附加核查结果供复查参考
+    if (hasVerification && note.verification && note.verification.length > 0) {
+      const traced = note.tracedCount ?? 0;
+      const needsCompare = note.needsCompareCount ?? 0;
+      const outOfScope = note.outOfScopeCount ?? 0;
+
+      if (outOfScope > 0) {
+        const outOfScopeClaims = note.verification
+          .filter(v => v.status === '超源')
+          .map(v => `"${v.claim}"`)
+          .join('; ');
+        prompt += `verification: ${traced} 条已溯源，${needsCompare} 条需对比，${outOfScope} 条超源\n`;
+        prompt += `verification_warning: 存在 ${outOfScope} 条超源声明：${outOfScopeClaims}\n`;
+      } else if (needsCompare > 0) {
+        prompt += `verification: ${traced} 条已溯源，${needsCompare} 条需对比\n`;
       } else {
-        prompt += `data_check: 数据核查全部一致\n`;
+        prompt += `verification: 全部已溯源\n`;
       }
     }
 
     prompt += '\n';
   });
 
-  const jsonFields = hasDataCheck
-    ? `"index": 1, "insight_score": X, "knowledge_score": X, "data_accuracy_score": X, "final_score": X, "verdict": "保留/丢弃", "reason": "简短理由"`
+  const jsonFields = hasVerification
+    ? `"index": 1, "insight_score": X, "knowledge_score": X, "source_trace_score": X, "final_score": X, "verdict": "保留/丢弃", "reason": "简短理由"`
     : `"index": 1, "insight_score": X, "knowledge_score": X, "final_score": X, "verdict": "保留/丢弃", "reason": "简短理由"`;
 
   prompt += `输出格式（严格按此 JSON 格式，不要输出其他内容）：
@@ -183,12 +195,12 @@ function buildReviewPrompt(notes: AtomicNote[]): string {
 /**
  * 解析 AI 复查输出（JSON）
  */
-function parseReviewOutput(aiContent: string, expectedCount: number): ReviewResult[] {
+function parseReviewOutput(aiContent: string, expectedCount: number, minScore: number = 3): ReviewResult[] {
   const parsed = parseJsonArrayFromAI<{
     index: number;
     insight_score: number;
     knowledge_score: number;
-    data_accuracy_score?: number;
+    source_trace_score?: number;
     final_score: number;
     verdict: string;
     reason: string;
@@ -198,17 +210,17 @@ function parseReviewOutput(aiContent: string, expectedCount: number): ReviewResu
     return parsed.map(r => {
       const insight = clampScore(r.insight_score ?? 3);
       const knowledge = clampScore(r.knowledge_score ?? 3);
-      const dataAccuracy = r.data_accuracy_score != null ? clampScore(r.data_accuracy_score) : undefined;
-      const final = r.final_score ?? (dataAccuracy != null
-        ? roundScore((insight + knowledge + dataAccuracy) / 3)
+      const sourceTrace = r.source_trace_score != null ? clampScore(r.source_trace_score) : undefined;
+      const final = r.final_score ?? (sourceTrace != null
+        ? roundScore((insight + knowledge + sourceTrace) / 3)
         : roundScore((insight + knowledge) / 2));
       return {
         index: Math.max(0, (r.index ?? 1) - 1), // 转为 0-based
         insightScore: insight,
         knowledgeScore: knowledge,
-        dataAccuracyScore: dataAccuracy,
+        sourceTraceScore: sourceTrace,
         finalScore: final,
-        verdict: final >= 3 ? '保留' as const : '丢弃' as const,
+        verdict: final >= minScore ? '保留' as const : '丢弃' as const,
         reason: r.reason ?? '',
       } as ReviewResult;
     });

@@ -61,6 +61,28 @@ export default class AtomicNotesPlugin extends Plugin {
       },
     });
 
+    // 添加命令：切换面板位置
+    this.addCommand({
+      id: 'open-panel-left',
+      name: '打开面板 - 左侧栏',
+      callback: () => this.openPanelAt('left'),
+    });
+    this.addCommand({
+      id: 'open-panel-right',
+      name: '打开面板 - 右侧栏',
+      callback: () => this.openPanelAt('right'),
+    });
+    this.addCommand({
+      id: 'open-panel-tab',
+      name: '打开面板 - 新标签页',
+      callback: () => this.openPanelAt('tab'),
+    });
+    this.addCommand({
+      id: 'open-panel-split',
+      name: '打开面板 - 分屏',
+      callback: () => this.openPanelAt('split'),
+    });
+
     // 添加 ribbon 图标
     this.addRibbonIcon('atom', '提炼原子笔记', () => {
       this.extractFromSelection();
@@ -94,6 +116,21 @@ export default class AtomicNotesPlugin extends Plugin {
     try {
       const data = await this.loadData();
       this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+
+      // 按版本号执行迁移
+      const currentVersion = this.settings.settingsVersion || 1;
+
+      if (currentVersion < 2) {
+        // v1 → v2：清理已废弃字段，升级 maxTokens 默认值
+        if ('enableDataCheck' in this.settings) {
+          delete (this.settings as any).enableDataCheck;
+        }
+        if (this.settings.maxTokens === 2000) {
+          this.settings.maxTokens = DEFAULT_SETTINGS.maxTokens;
+        }
+        this.settings.settingsVersion = 2;
+        await this.saveSettings();
+      }
     } catch (e) {
       console.warn('[Bamboo Darts] 设置加载失败，使用默认值:', e);
       this.settings = Object.assign({}, DEFAULT_SETTINGS);
@@ -113,7 +150,30 @@ export default class AtomicNotesPlugin extends Plugin {
       this.app.workspace.revealLeaf(existing[0]);
       return;
     }
-    const leaf = this.app.workspace.getLeaf('split');
+
+    const position = this.settings.panelPosition || 'right';
+    const leaf =
+      position === 'left' ? this.app.workspace.getLeftLeaf(false) :
+      position === 'right' ? this.app.workspace.getRightLeaf(false) :
+      this.app.workspace.getLeaf(position === 'tab' ? 'tab' : 'split');
+    await leaf.setViewState({ type: VIEW_TYPE_ATOMIC_PANEL, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  /**
+   * 在指定位置打开面板
+   */
+  async openPanelAt(position: 'left' | 'right' | 'tab' | 'split') {
+    // 如果面板已存在，先关闭
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_ATOMIC_PANEL);
+    if (existing.length > 0) {
+      await existing[0].detach();
+    }
+
+    const leaf =
+      position === 'left' ? this.app.workspace.getLeftLeaf(false) :
+      position === 'right' ? this.app.workspace.getRightLeaf(false) :
+      this.app.workspace.getLeaf(position === 'tab' ? 'tab' : 'split');
     await leaf.setViewState({ type: VIEW_TYPE_ATOMIC_PANEL, active: true });
     this.app.workspace.revealLeaf(leaf);
   }
@@ -213,7 +273,6 @@ export default class AtomicNotesPlugin extends Plugin {
         tagMode: this.settings.tagMode,
         factCheck: this.settings.factCheck,
         verifiedOnly: this.settings.verifiedOnly,
-        enableDataCheck: this.settings.enableDataCheck,
         enableReview: this.settings.enableReview,
         reviewModel: this.settings.reviewModel,
         reviewApiUrl: this.settings.reviewApiUrl,
@@ -223,6 +282,16 @@ export default class AtomicNotesPlugin extends Plugin {
         targetFolder: this.settings.targetFolder,
         enableVaultDedup: true,
         onProgress: progressCb,
+        // Profile 过滤策略
+        autoClassify: this.settings.autoClassify,
+        profile: this.settings.autoClassify ? undefined : this.settings.contentProfile,
+        profileConfigs: {
+          dense: this.settings.profileDense,
+          balanced: this.settings.profileBalanced,
+          sparse: this.settings.profileSparse,
+        },
+        // 深度提炼
+        enableDeepMode: this.settings.enableDeepMode,
       });
       if (!result.success || !result.notes) {
         if (result.error && result.error.includes('取消')) new Notice('提炼已取消');

@@ -7,8 +7,12 @@
 import { App, PluginSettingTab, Setting, Notice, requestUrl } from 'obsidian';
 import AtomicNotesPlugin from '../main';
 import { ExtractionHistoryEntry } from '../services/history-service';
+import { ContentProfile, ProfileConfig, PROFILE_CONFIGS, PROFILE_LABELS } from '../extraction/profiles';
 
 export interface PluginSettings {
+  // 设置版本号（用于迁移）
+  settingsVersion: number;
+
   // DeepSeek API
   deepseekApiKey: string;
   deepseekApiUrl: string;
@@ -20,9 +24,6 @@ export interface PluginSettings {
   fileNameTemplate: string;
   autoSave: boolean;
 
-  // Extraction mode
-  // extractionMode 已移除，只保留纯 AI 模式
-
   // Tag preferences
   tagPreferences: string[];
   tagMode: 'lenient' | 'strict';
@@ -30,10 +31,9 @@ export interface PluginSettings {
   // Backlink
   autoBacklink: boolean;
 
-  // Fact check
+  // Content verification
   factCheck: boolean;
   verifiedOnly: boolean;
-  enableDataCheck: boolean;
 
   // Discovery
   discoveryRecommendation: boolean;
@@ -46,23 +46,35 @@ export interface PluginSettings {
 
   // History
   extractionHistory?: ExtractionHistoryEntry[];
+
+  // Panel
+  panelPosition: 'left' | 'right' | 'tab' | 'split';
+
+  // Profile 过滤策略
+  autoClassify: boolean;
+  contentProfile: ContentProfile;
+  profileDense: ProfileConfig;
+  profileBalanced: ProfileConfig;
+  profileSparse: ProfileConfig;
+
+  // 深度提炼
+  enableDeepMode: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
+  settingsVersion: 2,
   deepseekApiKey: '',
   deepseekApiUrl: 'https://api.deepseek.com/v1/chat/completions',
   model: 'deepseek-v4-flash',
-  maxTokens: 2000,
+  maxTokens: 6000,
   targetFolder: 'Atomic Notes',
   fileNameTemplate: '{{title}}',
   autoSave: false,
-  // extractionMode 已移除，只保留纯 AI 模式
   tagPreferences: [],
   tagMode: 'lenient',
   autoBacklink: false,
   factCheck: true,
   verifiedOnly: false,
-  enableDataCheck: true,
   discoveryRecommendation: true,
 
   // Review
@@ -70,6 +82,19 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   reviewModel: '',
   reviewApiUrl: '',
   reviewApiKey: '',
+
+  // Panel
+  panelPosition: 'right',
+
+  // Profile 过滤策略
+  autoClassify: true,
+  contentProfile: 'balanced' as ContentProfile,
+  profileDense: { ...PROFILE_CONFIGS.dense },
+  profileBalanced: { ...PROFILE_CONFIGS.balanced },
+  profileSparse: { ...PROFILE_CONFIGS.sparse },
+
+  // 深度提炼
+  enableDeepMode: false,
 };
 
 export class AtomicNotesSettingTab extends PluginSettingTab {
@@ -139,7 +164,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('最大 Token 数')
-      .setDesc('AI 输出的最大 Token 数（默认：2000）')
+      .setDesc('AI 输出的最大 Token 数（默认：6000）')
       .addText(text =>
         text
           .setValue(String(this.plugin.settings.maxTokens))
@@ -266,13 +291,13 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     this.addDivider(containerEl);
 
     // ================================================================
-    // ⑥ 事实核查（质量保障 1）
+    // ⑥ 内容核查（质量保障 1）
     // ================================================================
-    containerEl.createEl('h3', { text: '事实核查' });
+    containerEl.createEl('h3', { text: '内容核查' });
 
     new Setting(containerEl)
-      .setName('启用事实核查')
-      .setDesc('提炼后自动核实关键事实声明是否能在原文中找到依据')
+      .setName('启用内容核查')
+      .setDesc('提炼后自动核查笔记中的事实和数据是否能在原文中找到依据')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.factCheck)
@@ -283,25 +308,13 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('仅保存已核实笔记')
-      .setDesc('开启时自动取消存疑/无据笔记的复选')
+      .setName('仅保存可溯源笔记')
+      .setDesc('开启时自动过滤包含超源声明的笔记')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.verifiedOnly)
           .onChange(async value => {
             this.plugin.settings.verifiedOnly = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName('启用数据核查')
-      .setDesc('核查笔记中的数字、百分比、日期等数据是否与原文一致，并尝试验证外部公开数据')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.enableDataCheck)
-          .onChange(async value => {
-            this.plugin.settings.enableDataCheck = value;
             await this.plugin.saveSettings();
           })
       );
@@ -364,8 +377,6 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           })
       );
 
-    this.addDivider(containerEl);
-
     // ================================================================
     // ⑧ 笔记发现（知识发现）
     // ================================================================
@@ -380,6 +391,204 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           .onChange(async value => {
             this.plugin.settings.discoveryRecommendation = value;
             await this.plugin.saveSettings();
+          })
+      );
+
+    this.addDivider(containerEl);
+
+    // ================================================================
+    // ⑨ 过滤策略
+    // ================================================================
+    containerEl.createEl('h3', { text: '过滤策略' });
+
+    new Setting(containerEl)
+      .setDesc('不同类型的文章需要不同的过滤强度。技术文献信息密集，应保留更多笔记；观点评论注重精华，只保留最有价值的洞见。');
+
+    new Setting(containerEl)
+      .setName('智能识别文章类型')
+      .setDesc('开启后自动判断内容特征，为每篇文章选择最合适的过滤策略')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.autoClassify)
+          .onChange(async value => {
+            this.plugin.settings.autoClassify = value;
+            await this.plugin.saveSettings();
+            this.display();
+          })
+      );
+
+    if (!this.plugin.settings.autoClassify) {
+      new Setting(containerEl)
+        .setName('选择策略')
+        .setDesc('手动指定当前文章适合的过滤强度')
+        .addDropdown(dropdown =>
+          dropdown
+            .addOption('dense', '技术文献（技术文档、论文、教程 — 保留更多笔记）')
+            .addOption('balanced', '通用文章（一般文章 — 平衡数量与质量）')
+            .addOption('sparse', '观点评论（社论、书评、随笔 — 只留精华）')
+            .setValue(this.plugin.settings.contentProfile)
+            .onChange(async value => {
+              this.plugin.settings.contentProfile = value as ContentProfile;
+              await this.plugin.saveSettings();
+              this.display();
+            })
+        );
+    }
+
+    // 当前策略预览
+    const currentProfile = this.plugin.settings.autoClassify ? null : this.plugin.settings.contentProfile;
+    if (!this.plugin.settings.autoClassify && currentProfile) {
+      const previewMap: Record<ContentProfile, { label: string; desc: string }> = {
+        dense: {
+          label: '技术文献',
+          desc: '去重宽松，允许相似笔记共存；质量门槛低，边缘洞见也会保留。适合技术文档、教程等信息密集内容。',
+        },
+        balanced: {
+          label: '通用文章',
+          desc: '适度去重，保留中等以上质量笔记。适合大多数文章。',
+        },
+        sparse: {
+          label: '观点评论',
+          desc: '严格去重，避免重复观点；质量门槛高，只保留最有价值的核心洞见。',
+        },
+      };
+      const preview = previewMap[currentProfile];
+      const previewEl = containerEl.createEl('div', {
+        cls: 'setting-item-description',
+      });
+      previewEl.style.background = 'var(--background-secondary)';
+      previewEl.style.padding = '8px 12px';
+      previewEl.style.borderRadius = '6px';
+      previewEl.style.marginBottom = '12px';
+      previewEl.createEl('strong', { text: `当前：${preview.label}` });
+      previewEl.createEl('br');
+      previewEl.appendText(preview.desc);
+    }
+
+    // 高级设置折叠区
+    const advancedToggle = new Setting(containerEl)
+      .setName('高级参数调整')
+      .setDesc('手动调整各策略的去重阈值和质量门槛，一般无需修改');
+    
+    let advancedContainer: HTMLElement | null = null;
+    advancedToggle.addToggle(toggle =>
+      toggle.setValue(false).onChange(show => {
+        if (show && !advancedContainer) {
+          advancedContainer = containerEl.createEl('div', { cls: 'filter-advanced-settings' });
+          // 插入到 toggle 设置项的紧后面，而不是容器末尾
+          advancedToggle.settingEl.insertAdjacentElement('afterend', advancedContainer);
+          advancedContainer.style.borderLeft = '3px solid var(--interactive-accent)';
+          advancedContainer.style.paddingLeft = '16px';
+          advancedContainer.style.marginTop = '8px';
+          advancedContainer.style.marginBottom = '12px';
+
+          // 重置按钮
+          new Setting(advancedContainer)
+            .setName('恢复默认参数')
+            .setDesc('将所有策略的阈值恢复为出厂设置')
+            .addButton(btn =>
+              btn
+                .setButtonText('重置')
+                .setWarning()
+                .onClick(async () => {
+                  this.plugin.settings.profileDense = { ...PROFILE_CONFIGS.dense };
+                  this.plugin.settings.profileBalanced = { ...PROFILE_CONFIGS.balanced };
+                  this.plugin.settings.profileSparse = { ...PROFILE_CONFIGS.sparse };
+                  await this.plugin.saveSettings();
+                  this.display();
+                })
+            );
+
+          const profiles: { key: 'profileDense' | 'profileBalanced' | 'profileSparse'; label: string }[] = [
+            { key: 'profileDense', label: '技术文献' },
+            { key: 'profileBalanced', label: '通用文章' },
+            { key: 'profileSparse', label: '观点评论' },
+          ];
+
+          for (const { key, label } of profiles) {
+            const cfg = this.plugin.settings[key];
+
+            advancedContainer.createEl('h4', { text: label, cls: 'filter-profile-group' });
+
+            new Setting(advancedContainer)
+              .setName('批内去重严格度')
+              .setDesc('同批提炼的笔记之间，相似度多高才算重复？值越高越宽松，保留更多相似笔记')
+              .addText(t => t.setValue(String(cfg.crossBatchThreshold)).onChange(async v => {
+                const n = parseFloat(v);
+                if (!isNaN(n) && n > 0 && n <= 1) { this.plugin.settings[key].crossBatchThreshold = n; await this.plugin.saveSettings(); }
+              }));
+
+            new Setting(advancedContainer)
+              .setName('与已有笔记去重（自动丢弃）')
+              .setDesc('和知识库已有笔记太相似时直接丢弃，避免重复。值越高越宽松')
+              .addText(t => t.setValue(String(cfg.vaultHighThreshold)).onChange(async v => {
+                const n = parseFloat(v);
+                if (!isNaN(n) && n > 0 && n <= 1) { this.plugin.settings[key].vaultHighThreshold = n; await this.plugin.saveSettings(); }
+              }));
+
+            new Setting(advancedContainer)
+              .setName('与已有笔记去重（待确认）')
+              .setDesc('相似度低于上一条但仍较高时，标记为"待确认"让你手动决定')
+              .addText(t => t.setValue(String(cfg.vaultMidThreshold)).onChange(async v => {
+                const n = parseFloat(v);
+                if (!isNaN(n) && n > 0 && n <= 1) { this.plugin.settings[key].vaultMidThreshold = n; await this.plugin.saveSettings(); }
+              }));
+
+            new Setting(advancedContainer)
+              .setName('质量评分门槛')
+              .setDesc('AI 复查评分（1-5 分）低于此值的笔记会被丢弃。值越低保留越多')
+              .addText(t => t.setValue(String(cfg.reviewMinScore)).onChange(async v => {
+                const n = parseInt(v, 10);
+                if (!isNaN(n) && n >= 1 && n <= 5) { this.plugin.settings[key].reviewMinScore = n; await this.plugin.saveSettings(); }
+              }));
+          }
+        } else if (!show && advancedContainer) {
+          advancedContainer.remove();
+          advancedContainer = null;
+        }
+      })
+    );
+
+    this.addDivider(containerEl);
+
+    // ================================================================
+    // ⑩ 深度提炼
+    // ================================================================
+    containerEl.createEl('h3', { text: '深度提炼' });
+
+    new Setting(containerEl)
+      .setName('启用深度提炼模式')
+      .setDesc('对超长文章自动分段提炼，消耗更多 token')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.enableDeepMode)
+          .onChange(async value => {
+            this.plugin.settings.enableDeepMode = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    this.addDivider(containerEl);
+
+    // ================================================================
+    // ⑪ 面板设置
+    // ================================================================
+    containerEl.createEl('h3', { text: '面板设置' });
+
+    new Setting(containerEl)
+      .setName('面板位置')
+      .setDesc('控制插件面板在 Obsidian 界面中显示的位置')
+      .addDropdown(dropdown =>
+        dropdown
+          .addOption('right', '右侧栏（推荐，与属性面板同列）')
+          .addOption('left', '左侧栏（与文件树、标签同列）')
+          .addOption('tab', '新标签页')
+          .addOption('split', '分屏（当前编辑器分屏显示）')
+          .setValue(this.plugin.settings.panelPosition || 'right')
+          .onChange(async value => {
+            this.plugin.settings.panelPosition = value as 'left' | 'right' | 'tab' | 'split';
+            await this.plugin.saveSettings();
+            new Notice('面板位置已更新，重新打开插件面板即可生效');
           })
       );
 

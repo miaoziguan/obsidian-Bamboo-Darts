@@ -6,11 +6,8 @@
 import { Modal, App, Setting } from 'obsidian';
 import { AtomicNote } from '../utils/notes-standards';
 import { ExtractionResult, PendingDuplicate } from '../extractor';
-
-interface DedupResult {
-  uniqueNotes: AtomicNote[];
-  duplicates: { isDuplicate: boolean; similarity: number; matchedNote?: string; matchedContent?: string }[];
-}
+import { PROFILE_LABELS, ContentProfile } from '../extraction/profiles';
+import { DedupResult, DuplicateInfo } from '../deduplicator';
 
 /** 步骤状态对应的颜色 */
 const STEP_COLORS: Record<string, string> = {
@@ -32,6 +29,8 @@ export class ResultModal extends Modal {
   private countEl: HTMLElement | null = null;
   /** 用户确认保留的疑似重复索引 */
   private confirmedPending: Set<number> = new Set();
+  /** 用户从去重详情中恢复的批内重复索引 */
+  private restoredCrossBatch: Set<number> = new Set();
 
   constructor(
     app: App,
@@ -51,6 +50,23 @@ export class ResultModal extends Modal {
 
     contentEl.createEl('h2', { text: '原子笔记提炼结果' });
 
+    // 显示检测到的策略徽标
+    if (this.result.detectedProfile) {
+      const badge = contentEl.createEl('div', {
+        cls: 'atomic-notes-profile-badge',
+      });
+      badge.style.display = 'inline-block';
+      badge.style.padding = '4px 12px';
+      badge.style.borderRadius = '12px';
+      badge.style.fontSize = '12px';
+      badge.style.background = 'var(--background-modifier-hover)';
+      badge.style.color = 'var(--text-muted)';
+      badge.style.marginBottom = '8px';
+      const profileName = PROFILE_LABELS[this.result.detectedProfile] || this.result.detectedProfile;
+      const sourceLabel = this.result.profileSource === 'auto' ? '自动检测' : '手动指定';
+      badge.textContent = `策略: ${profileName} (${sourceLabel})`;
+    }
+
     this.renderSteps(contentEl);
 
     if (this.result.success && this.result.notes) {
@@ -60,16 +76,16 @@ export class ResultModal extends Modal {
         this.renderDedupReport(contentEl);
       }
 
+      if (this.result.crossBatchDuplicates && this.result.crossBatchDuplicates.length > 0) {
+        this.renderCrossBatchDetails(contentEl);
+      }
+
       if (this.result.vaultDedupPending && this.result.vaultDedupPending.length > 0) {
         this.renderPendingDuplicates(contentEl);
       }
 
-      if (this.result.factCheckSummary) {
-        this.renderFactCheckSummary(contentEl);
-      }
-
-      if (this.result.dataCheckSummary) {
-        this.renderDataCheckSummary(contentEl);
+      if (this.result.verificationSummary) {
+        this.renderVerificationSummary(contentEl);
       }
 
       this.renderNotes(contentEl);
@@ -143,6 +159,149 @@ export class ResultModal extends Modal {
       text: `最终保存 ${this.dedupResult.uniqueNotes.length} 条笔记`,
       attr: { style: 'font-weight:600;color:var(--text-accent)' },
     });
+  }
+
+  /** 批内去重详情（可折叠，支持手动恢复） */
+  private renderCrossBatchDetails(container: HTMLElement) {
+    const dups = this.result.crossBatchDuplicates;
+    if (!dups || dups.length === 0) return;
+
+    const section = container.createEl('div', { cls: 'atomic-notes-cross-dedup' });
+
+    // 折叠头部
+    const header = section.createEl('div', {
+      attr: {
+        style: 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 0;user-select:none',
+      },
+    });
+    const arrow = header.createEl('span', {
+      text: '▶',
+      attr: { style: 'font-size:10px;transition:transform 0.2s;display:inline-block' },
+    });
+    header.createEl('span', {
+      text: `批内去重详情（${dups.length} 条被合并）`,
+      attr: { style: 'font-weight:600;font-size:13px' },
+    });
+    header.createEl('span', {
+      text: '点击展开',
+      attr: { style: 'font-size:11px;color:var(--text-muted)' },
+    });
+
+    const detailContainer = section.createEl('div', {
+      attr: { style: 'display:none;border-left:3px solid var(--background-modifier-border);padding-left:12px;margin-top:8px' },
+    });
+
+    let isOpen = false;
+    header.addEventListener('click', () => {
+      isOpen = !isOpen;
+      detailContainer.style.display = isOpen ? 'block' : 'none';
+      arrow.style.transform = isOpen ? 'rotate(90deg)' : 'rotate(0deg)';
+      hintEl.textContent = isOpen ? '点击收起' : '点击展开';
+    });
+
+    const hintEl = header.lastChild as HTMLElement;
+
+    // 每条被删笔记
+    for (let i = 0; i < dups.length; i++) {
+      const dup = dups[i];
+      const card = detailContainer.createEl('div', {
+        attr: {
+          style: 'border:1px solid var(--background-modifier-border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--background-secondary)',
+        },
+      });
+
+      // 相似度
+      const simPercent = (dup.similarity * 100).toFixed(1);
+      card.createEl('div', {
+        text: `相似度 ${simPercent}%`,
+        attr: { style: 'font-size:12px;color:var(--text-accent);font-weight:600;margin-bottom:4px' },
+      });
+
+      // 被删笔记
+      const removedRow = card.createEl('div', { attr: { style: 'margin-bottom:4px' } });
+      removedRow.createEl('span', {
+        text: '被合并：',
+        attr: { style: 'font-weight:600;font-size:12px' },
+      });
+      removedRow.createEl('span', {
+        text: dup.removedTitle,
+        attr: { style: 'font-size:12px' },
+      });
+      const removedPreview = dup.removedContent.slice(0, 120) + (dup.removedContent.length > 120 ? '...' : '');
+      card.createEl('div', {
+        text: removedPreview,
+        attr: { style: 'font-size:11px;color:var(--text-muted);margin-bottom:6px' },
+      });
+
+      // 存活笔记
+      const matchedRow = card.createEl('div', { attr: { style: 'margin-bottom:6px' } });
+      matchedRow.createEl('span', {
+        text: '并入：',
+        attr: { style: 'font-weight:600;font-size:12px' },
+      });
+      matchedRow.createEl('span', {
+        text: dup.matchedNote || '未知',
+        attr: { style: 'font-size:12px' },
+      });
+      if (dup.matchedContent) {
+        card.createEl('div', {
+          text: dup.matchedContent.slice(0, 120) + (dup.matchedContent.length > 120 ? '...' : ''),
+          attr: { style: 'font-size:11px;color:var(--text-muted);margin-bottom:6px' },
+        });
+      }
+
+      // 恢复按钮
+      if (this.restoredCrossBatch.has(i)) {
+        const restoredLabel = card.createEl('span', {
+          text: '已恢复',
+          attr: { style: 'font-size:11px;color:var(--text-muted);font-style:italic' },
+        });
+        void restoredLabel;
+      } else {
+        const restoreBtn = card.createEl('button', {
+          text: '恢复为独立笔记',
+          attr: { style: 'font-size:11px;padding:2px 10px;cursor:pointer' },
+        });
+        restoreBtn.addEventListener('click', () => {
+          this.restoreCrossBatchNote(dup, i);
+          card.style.opacity = '0.6';
+          restoreBtn.detach();
+          card.createEl('span', {
+            text: '已恢复',
+            attr: { style: 'font-size:11px;color:var(--text-muted);font-style:italic' },
+          });
+        });
+      }
+    }
+  }
+
+  /** 将被合并的笔记恢复为独立笔记 */
+  private restoreCrossBatchNote(dup: DuplicateInfo, index: number) {
+    if (!this.result.notes) return;
+    const note: AtomicNote = {
+      title: dup.removedTitle,
+      content: dup.removedContent,
+      tags: [],
+      createdAt: new Date().toISOString(),
+    };
+    const newIdx = this.result.notes.length;
+    this.result.notes.push(note);
+    this.selectedNotes.add(newIdx);
+    this.restoredCrossBatch.add(index);
+    this.updateSelectionCount();
+
+    // 更新笔记列表区域
+    this.refreshNotesList();
+  }
+
+  /** 刷新笔记卡片列表（用于恢复/变更后重新渲染） */
+  private notesListEl: HTMLElement | null = null;
+  private refreshNotesList() {
+    if (!this.notesListEl) return;
+    const parent = this.notesListEl.parentElement;
+    if (!parent) return;
+    this.notesListEl.detach();
+    this.renderNotes(parent);
   }
 
   /** 疑似重复确认 UI（中相似度 60-80%） */
@@ -263,58 +422,30 @@ export class ResultModal extends Modal {
     });
   }
 
-  private renderFactCheckSummary(container: HTMLElement) {
-    const summary = this.result.factCheckSummary;
+  private renderVerificationSummary(container: HTMLElement) {
+    const summary = this.result.verificationSummary;
     if (!summary) return;
 
     const el = container.createEl('div');
-    el.createEl('div', { text: '事实核查摘要', cls: 'atomic-notes-section-header' });
+    el.createEl('div', { text: '内容核查', cls: 'atomic-notes-section-header' });
 
-    const total = summary.verified + summary.doubtful + summary.unverified;
+    const total = summary.traced + summary.needsCompare + summary.outOfScope;
     if (total === 0) {
-      el.createEl('p', { text: '无可核实的声明', attr: { style: 'color:var(--text-muted)' } });
+      el.createEl('p', { text: '无可验证内容', attr: { style: 'color:var(--text-muted)' } });
       return;
     }
 
     const row = el.createEl('div', { attr: { style: 'display:flex;gap:12px;align-items:center' } });
     row.createEl('span', {
-      text: `有据 ${summary.verified}`,
+      text: `已溯源 ${summary.traced}`,
       cls: 'atomic-notes-verify-chip verified',
     });
     row.createEl('span', {
-      text: `存疑 ${summary.doubtful}`,
+      text: `需对比 ${summary.needsCompare}`,
       cls: 'atomic-notes-verify-chip doubtful',
     });
     row.createEl('span', {
-      text: `无据 ${summary.unverified}`,
-      cls: 'atomic-notes-verify-chip unverified',
-    });
-  }
-
-  private renderDataCheckSummary(container: HTMLElement) {
-    const summary = this.result.dataCheckSummary;
-    if (!summary) return;
-
-    const el = container.createEl('div');
-    el.createEl('div', { text: '数据核查摘要', cls: 'atomic-notes-section-header' });
-
-    const total = summary.consistent + summary.deviation + summary.unverifiable;
-    if (total === 0) {
-      el.createEl('p', { text: '未发现数据点', attr: { style: 'color:var(--text-muted)' } });
-      return;
-    }
-
-    const row = el.createEl('div', { attr: { style: 'display:flex;gap:12px;align-items:center' } });
-    row.createEl('span', {
-      text: `数据一致 ${summary.consistent}`,
-      cls: 'atomic-notes-verify-chip verified',
-    });
-    row.createEl('span', {
-      text: `数据偏差 ${summary.deviation}`,
-      cls: 'atomic-notes-verify-chip doubtful',
-    });
-    row.createEl('span', {
-      text: `无法验证 ${summary.unverifiable}`,
+      text: `超源 ${summary.outOfScope}`,
       cls: 'atomic-notes-verify-chip unverified',
     });
   }
@@ -322,6 +453,7 @@ export class ResultModal extends Modal {
   /** 卡片式笔记列表 */
   private renderNotes(container: HTMLElement) {
     const notesEl = container.createEl('div');
+    this.notesListEl = notesEl;
     const headerEl = notesEl.createEl('div', {
       attr: { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px' },
     });
@@ -368,23 +500,22 @@ export class ResultModal extends Modal {
         text: `${i + 1}. ${note.title}`,
       });
 
-      // 核查状态 chip
+      // 核查状态 chip（组合显示所有非零计数）
       if (note.verification && note.verification.length > 0) {
-        if (note.unverifiedCount > 0) {
-          headerRow.createEl('span', { cls: 'atomic-notes-verify-chip unverified', text: '无据' });
-        } else if (note.doubtfulCount > 0) {
-          headerRow.createEl('span', { cls: 'atomic-notes-verify-chip doubtful', text: '存疑' });
-        } else {
-          headerRow.createEl('span', { cls: 'atomic-notes-verify-chip verified', text: '已核实' });
+        const traced = note.tracedCount ?? 0;
+        const needsCompare = note.needsCompareCount ?? 0;
+        const outOfScope = note.outOfScopeCount ?? 0;
+        const chipGroup = headerRow.createEl('span', {
+          attr: { style: 'display:inline-flex;gap:4px;margin-left:auto' },
+        });
+        if (traced > 0) {
+          chipGroup.createEl('span', { cls: 'atomic-notes-verify-chip verified', text: `溯源${traced}` });
         }
-      }
-
-      // 数据核查 chip
-      if (note.dataCheck && note.dataCheck.length > 0) {
-        if ((note.dataDeviationCount ?? 0) > 0) {
-          headerRow.createEl('span', { cls: 'atomic-notes-data-chip deviation', text: '数据偏差' });
-        } else {
-          headerRow.createEl('span', { cls: 'atomic-notes-data-chip consistent', text: '数据一致' });
+        if (needsCompare > 0) {
+          chipGroup.createEl('span', { cls: 'atomic-notes-verify-chip doubtful', text: `对比${needsCompare}` });
+        }
+        if (outOfScope > 0) {
+          chipGroup.createEl('span', { cls: 'atomic-notes-verify-chip unverified', text: `超源${outOfScope}` });
         }
       }
 
@@ -392,12 +523,119 @@ export class ResultModal extends Modal {
       const preview = note.content.slice(0, 200) + (note.content.length > 200 ? '...' : '');
       card.createEl('div', { cls: 'atomic-notes-card-preview', text: preview });
 
-      // ── 标签 chip ──
+      // ── 核查详情（可折叠） ──
+      if (note.verification && note.verification.length > 0) {
+        const verifySection = card.createEl('div', {
+          attr: { style: 'margin-top:6px' },
+        });
+
+        const verifyHeader = verifySection.createEl('div', {
+          attr: {
+            style: 'display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;padding:2px 0',
+          },
+        });
+        const verifyArrow = verifyHeader.createEl('span', {
+          text: '▸',
+          attr: { style: 'font-size:10px;transition:transform 0.2s;display:inline-block;color:var(--text-muted)' },
+        });
+        verifyHeader.createEl('span', {
+          text: '核查详情',
+          attr: { style: 'font-size:11px;color:var(--text-muted);font-weight:500' },
+        });
+
+        const verifyBody = verifySection.createEl('div', {
+          attr: { style: 'display:none;margin-top:6px;border-left:2px solid var(--background-modifier-border);padding-left:10px' },
+        });
+
+        let verifyOpen = false;
+        verifyHeader.addEventListener('click', () => {
+          verifyOpen = !verifyOpen;
+          verifyBody.style.display = verifyOpen ? 'block' : 'none';
+          verifyArrow.style.transform = verifyOpen ? 'rotate(90deg)' : 'rotate(0deg)';
+        });
+
+        const statusColorMap: Record<string, string> = {
+          '已溯源': 'var(--color-green)',
+          '需对比': 'var(--color-orange)',
+          '超源': 'var(--color-red)',
+        };
+
+        for (const item of note.verification) {
+          const row = verifyBody.createEl('div', {
+            attr: { style: 'margin-bottom:8px' },
+          });
+
+          // 状态 + 声明
+          const claimRow = row.createEl('div', {
+            attr: { style: 'display:flex;align-items:flex-start;gap:6px' },
+          });
+          claimRow.createEl('span', {
+            text: item.status,
+            attr: {
+              style: `font-size:9px;padding:1px 6px;border-radius:8px;color:#fff;background:${statusColorMap[item.status] || 'var(--text-faint)'};white-space:nowrap;flex-shrink:0;margin-top:1px`,
+            },
+          });
+          claimRow.createEl('span', {
+            text: item.claim,
+            attr: { style: 'font-size:11px;color:var(--text-normal);line-height:1.4' },
+          });
+
+          // 原文对应句子
+          if (item.sourceText) {
+            row.createEl('div', {
+              text: `📖 ${item.sourceText}`,
+              attr: { style: 'font-size:10px;color:var(--text-muted);margin-top:3px;padding:4px 6px;background:var(--background-secondary);border-radius:4px;line-height:1.4' },
+            });
+          }
+
+          // 差异说明
+          if (item.diffNote) {
+            row.createEl('div', {
+              text: `⚠ ${item.diffNote}`,
+              attr: { style: 'font-size:10px;color:var(--color-orange);margin-top:2px' },
+            });
+          }
+
+          // 补充说明
+          if (item.reason && !item.sourceText) {
+            row.createEl('div', {
+              text: item.reason,
+              attr: { style: 'font-size:10px;color:var(--text-faint);margin-top:2px;font-style:italic' },
+            });
+          }
+        }
+      }
+
+      // ── 标签 chip / 综合判断标记 ──
       if (note.tags && note.tags.length > 0) {
         const footer = card.createEl('div', { cls: 'atomic-notes-card-footer' });
         for (const tag of note.tags) {
           footer.createEl('span', { cls: 'atomic-notes-tag-chip', text: tag });
         }
+      } else {
+        // 无标签笔记 → 综合判断型，颜色由核查结果决定
+        const footer = card.createEl('div', { cls: 'atomic-notes-card-footer' });
+        let synthColor = 'var(--text-faint)';   // 默认：无核查数据
+        let synthLabel = '综合判断';
+        const outOfScope = note.outOfScopeCount ?? 0;
+        const needsCompare = note.needsCompareCount ?? 0;
+        const traced = note.tracedCount ?? 0;
+        if (outOfScope > 0) {
+          synthColor = 'var(--color-red)';
+          synthLabel = '综合判断 · 超源';
+        } else if (needsCompare > 0) {
+          synthColor = 'var(--color-orange)';
+          synthLabel = '综合判断 · 需对比';
+        } else if (traced > 0) {
+          synthColor = 'var(--color-green)';
+          synthLabel = '综合判断 · 已溯源';
+        }
+        footer.createEl('span', {
+          text: synthLabel,
+          attr: {
+            style: `font-size:10px;padding:2px 8px;border-radius:10px;color:#fff;background:${synthColor};font-style:italic`,
+          },
+        });
       }
     }
   }

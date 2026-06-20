@@ -3,9 +3,6 @@
  * 从各个模块提取硬编码数值，统一管理便于调整
  */
 
-/** 相似度阈值（同批交叉去重 & 知识库比对） */
-export const SIMILARITY_THRESHOLD = 0.5;
-
 /** 内容最小长度——硬阻断（质量门控） */
 export const GATE_MIN_CONTENT_LENGTH = 50;
 
@@ -45,32 +42,40 @@ export const MIN_NOTE_CONTENT_LENGTH = 10;
 /** 知识库去重并行批次大小 */
 export const DEDUP_BATCH_SIZE = 20;
 
-/** 去重最小关键词门槛——低于此值不判定重复，避免小集合误判 */
-export const DEDUP_MIN_KEYWORDS = 3;
+/** 内容核查：单次最大可验证声明数量 */
+export const MAX_CLAIMS_PER_CHECK = 30;
 
-/** 数据核查：单次最大数据点数量 */
-export const MAX_DATA_POINTS_PER_CHECK = 30;
-
-/** 事实核查：单次最大事实数量 */
-export const MAX_FACTS_PER_CHECK = 20;
-
-/** 原文截断阈值（与 INPUT_TRUNCATE_LENGTH 对齐，避免 Phase 5 核查盲区） */
-export const ORIGINAL_TEXT_CHUNK_SIZE = 10000;
-
-/** 【新版去重】高相似度阈值（几乎重复） */
-export const DEDUP_HIGH_THRESHOLD = 0.70;
-
-/** 【新版去重】中相似度阈值（主题接近） */
-export const DEDUP_MID_THRESHOLD = 0.45;
-
-/** 【新版去重】弱相关阈值（有部分术语重合） */
-export const DEDUP_WEAK_THRESHOLD = 0.30;
-
-/** 【新版去重】最小 corpus 大小（低于此值降级为纯 TF 余弦） */
-export const DEDUP_CORPUS_MIN_SIZE = 20;
-
-/** 【新版去重】缓存 TTL（毫秒） */
+/** 去重缓存 TTL（毫秒） */
 export const DEDUP_CACHE_TTL = 5 * 60 * 1000;
 
-/** 【新版去重】TOP-K 相似匹配返回数量 */
-export const DEDUP_TOP_K = 3;
+/** 去重/关键词提取共用停用词表 */
+export const STOP_WORDS = new Set([
+  '的', '了', '在', '是', '我', '有', '和', '就', '不', '人',
+  '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你',
+  '会', '着', '没有', '看', '好', '自己', '这',
+  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+  'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
+]);
+
+// ─── 去重模块常量 ───
+
+/** 最小 token 数：低于此值的笔记不参与重复判定 */
+export const MIN_TOKENS_THRESHOLD = 3;
+
+/** 同批去重相似度阈值（余弦相似度） */
+export const CROSS_BATCH_THRESHOLD = 0.65;
+
+/** IDF 平滑常量 */
+export const IDF_SMOOTH = 1.0;
+
+/** 长度比预过滤阈值：两篇长度差距超过此比例则跳过比对 */
+export const LENGTH_RATIO_THRESHOLD = 0.3;
+
+/** 知识库去重：标题相似度权重 */
+export const TITLE_WEIGHT = 0.25;
+
+/** 知识库去重：内容相似度权重 */
+export const CONTENT_WEIGHT = 0.75;
+
+/** 短笔记放大阈值（字符数），短笔记 token 稀疏需放大相似度 */
+export const SHORT_NOTE_LENGTH = 100;

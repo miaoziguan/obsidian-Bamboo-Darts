@@ -5,23 +5,18 @@
 
 import { MIN_NOTE_CONTENT_LENGTH } from '../constants';
 
+export type VerificationStatus = '已溯源' | '需对比' | '超源';
+
 export interface VerificationItem {
-  index: number;
-  status: '有据' | '存疑' | '无据';
-  reason?: string;
-  noteIndex?: number;
-}
-
-export type DataCheckStatus = '一致' | '偏差' | '无法验证';
-
-export interface DataCheckItem {
-  /** 笔记中提取到的数据点 */
+  /** 笔记中的声明或数据点 */
   claim: string;
-  /** 原文中对应的数据（如果找到） */
-  original?: string;
   /** 核查状态 */
-  status: DataCheckStatus;
-  /** 说明 */
+  status: VerificationStatus;
+  /** 原文对应句子（已溯源/需对比时） */
+  sourceText?: string;
+  /** 差异说明（需对比时，如"原文为 6%，笔记写 6.3%"） */
+  diffNote?: string;
+  /** 补充说明 */
   reason?: string;
 }
 
@@ -32,13 +27,9 @@ export interface AtomicNote {
   tags?: string[];
   createdAt: string;
   verification?: VerificationItem[];
-  verifiedCount?: number;
-  doubtfulCount?: number;
-  unverifiedCount?: number;
-  dataCheck?: DataCheckItem[];
-  dataConsistentCount?: number;
-  dataDeviationCount?: number;
-  dataUnverifiableCount?: number;
+  tracedCount?: number;
+  needsCompareCount?: number;
+  outOfScopeCount?: number;
 }
 
 /** 预编译的正则表达式（优化性能，避免重复编译） */
@@ -561,12 +552,18 @@ function ensureTitles(notes: AtomicNote[]): AtomicNote[] {
  * 确保每条笔记至少有基础标签
  * 如果 AI 没有返回标签，从内容中提取关键词
  */
+/** 判断标签是否为无意义的占位值（AI 常见偷懒输出） */
+const GARBAGE_TAGS = new Set(['none', 'null', 'n/a', 'na', '无', '没有', '空', '未标注', '暂无', '待补充']);
+
 export function ensureTags(notes: AtomicNote[], userPreferences?: string[]): AtomicNote[] {
   for (const note of notes) {
-    // 已有标签则跳过
-    if (note.tags && note.tags.length > 0) continue;
+    // 过滤掉无意义标签后，仍有有效标签则跳过
+    const validTags = (note.tags || []).filter(
+      t => t.length >= 2 && !GARBAGE_TAGS.has(t.toLowerCase())
+    );
+    if (validTags.length > 0) continue;
 
-    const keywords = extractKeywords(note.content, note.title);
+    const keywords = extractTagCandidates(note.content, note.title);
     // 如果用户有标签偏好，优先匹配
     if (userPreferences && userPreferences.length > 0) {
       const matched = keywords.filter(k =>
@@ -658,7 +655,7 @@ function isQualityTitle(title: string): boolean {
  * 从内容中提取关键词作为基础标签
  * 策略：按优先级依次尝试多种提取方式
  */
-function extractKeywords(content: string, title?: string): string[] {
+function extractTagCandidates(content: string, title?: string): string[] {
   const keywords = new Set<string>();
 
   // 1. 提取 **加粗** 文本（通常是关键概念）
@@ -709,6 +706,9 @@ function extractKeywords(content: string, title?: string): string[] {
       keywords.add(subjectMatch[1].trim());
     }
   }
+
+  // 注意：不再做强行兜底。五种策略全部落空的笔记属于"综合判断"型，
+  // 无标签是合法状态，由核查结果决定其价值，而非强制塞标签。
 
   return Array.from(keywords).slice(0, 6);
 }

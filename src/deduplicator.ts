@@ -17,79 +17,17 @@
 
 import { Vault, TFile } from 'obsidian';
 import { AtomicNote } from './utils/notes-standards';
-import { SIMILARITY_THRESHOLD, DEDUP_BATCH_SIZE } from './constants';
-
-// ─── 常量定义 ───
-
-const STOP_WORDS = new Set([
-  '的', '了', '在', '是', '我', '有', '和', '就', '不', '人',
-  '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你',
-  '会', '着', '没有', '看', '好', '自己', '这',
-  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-  'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
-]);
-
-// 最小 token 数：低于此值的笔记不参与重复判定
-const MIN_TOKENS_THRESHOLD = 3;
-
-// 同批去重相似度阈值（与旧 SIMILARITY_THRESHOLD 保持一致语义）
-// 注意：余弦相似度通常比 Jaccard 更"宽容"，阈值需略调低
-const CROSS_BATCH_THRESHOLD = 0.65;
-const HIGH_SIM_THRESHOLD = 0.7;
-const MID_SIM_THRESHOLD = 0.55;
-
-// IDF 平滑常量
-const IDF_SMOOTH = 1.0;
+import {
+  DEDUP_BATCH_SIZE, DEDUP_CACHE_TTL,
+  MIN_TOKENS_THRESHOLD, CROSS_BATCH_THRESHOLD, IDF_SMOOTH,
+  LENGTH_RATIO_THRESHOLD, TITLE_WEIGHT, CONTENT_WEIGHT, SHORT_NOTE_LENGTH,
+} from './constants';
 
 // ─── Token 化 ───
 
-/**
- * 从文本中提取 token：
- * - 中文：字符 3-gram
- * - 英文：完整单词（≥2 字符）
- * 返回 token → 频次 的 Map
- */
-function tokenize(text: string): Map<string, number> {
-  if (!text) return new Map();
-
-  const normalized = text.toLowerCase();
-  const tokens = new Map<string, number>();
-
-  // 按空格分割成"词块"（中文词块是连续汉字串）
-  const chunks = normalized
-    .replace(/[^\w\s\u4e00-\u9fff]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length >= 1);
-
-  for (const chunk of chunks) {
-    if (/[\u4e00-\u9fff]/.test(chunk)) {
-      // 中文：字符 3-gram（长度不足 3 则退化）
-      if (chunk.length >= 3) {
-        for (let i = 0; i <= chunk.length - 3; i++) {
-          const gram = chunk.slice(i, i + 3);
-          if (!STOP_WORDS.has(gram)) {
-            tokens.set(gram, (tokens.get(gram) || 0) + 1);
-          }
-        }
-      } else if (chunk.length >= 2) {
-        // 短中文：退回 2-gram
-        for (let i = 0; i <= chunk.length - 2; i++) {
-          const gram = chunk.slice(i, i + 2);
-          if (!STOP_WORDS.has(gram)) {
-            tokens.set(gram, (tokens.get(gram) || 0) + 1);
-          }
-        }
-      }
-    } else {
-      // 英文：完整词
-      if (chunk.length >= 2 && !STOP_WORDS.has(chunk)) {
-        tokens.set(chunk, (tokens.get(chunk) || 0) + 1);
-      }
-    }
-  }
-
-  return tokens;
-}
+import { tokenize } from './utils/tokenizer';
+// 重导出供外部直接使用（如测试）
+export { tokenize };
 
 // ─── TF-IDF 核心 ───
 
@@ -190,14 +128,16 @@ function cosineSimilarity(v1: TfIdfVector, v2: TfIdfVector): number {
 
 // ─── 类型与数据结构 ───
 
-interface DuplicateInfo {
+export interface DuplicateInfo {
   isDuplicate: boolean;
   similarity: number;
   matchedNote?: string;
   matchedContent?: string;
+  removedTitle: string;
+  removedContent: string;
 }
 
-interface DedupResult {
+export interface DedupResult {
   uniqueNotes: AtomicNote[];
   removedCount: number;
   duplicates: DuplicateInfo[];
@@ -214,8 +154,6 @@ export interface VaultMatchInfo {
 }
 
 // ─── 缓存 ───
-
-const DEDUP_CACHE_TTL = 5 * 60 * 1000;
 
 /**
  * 单篇已有笔记的预处理缓存
@@ -288,7 +226,8 @@ function isPathInFolder(filePath: string, targetFolder: string): boolean {
  * 同批笔记交叉去重（基于 TF-IDF + 余弦相似度）
  * 新笔记之间互为语料，动态计算 IDF
  */
-export function crossCheckBatch(notes: AtomicNote[]): DedupResult {
+export function crossCheckBatch(notes: AtomicNote[], threshold?: number): DedupResult {
+  const effectiveThreshold = threshold ?? CROSS_BATCH_THRESHOLD;
   const uniqueNotes: AtomicNote[] = [];
   const uniqueIndices: number[] = [];
   const duplicates: DuplicateInfo[] = [];
@@ -303,8 +242,6 @@ export function crossCheckBatch(notes: AtomicNote[]): DedupResult {
   const vectors = docTokens.map(tokens => computeTfIdfVector(tokens, idfTable));
 
   // 4. 交叉比对
-  const LENGTH_RATIO_THRESHOLD = 0.3;
-
   for (let i = 0; i < notes.length; i++) {
     const note = notes[i];
     const vec = vectors[i];
@@ -323,13 +260,15 @@ export function crossCheckBatch(notes: AtomicNote[]): DedupResult {
       }
 
       const similarity = cosineSimilarity(vec, uniqueVec);
-      if (similarity > CROSS_BATCH_THRESHOLD) {
+      if (similarity > effectiveThreshold) {
         isDuplicate = true;
         bestMatch = {
           isDuplicate: true,
           similarity,
           matchedNote: `同批笔记 #${j + 1}: ${uniqueNotes[j].title}`,
           matchedContent: uniqueNotes[j].content.slice(0, 200),
+          removedTitle: note.title,
+          removedContent: note.content,
         };
         break;
       }
@@ -406,79 +345,6 @@ async function loadAndPreprocessExistingNotes(
 }
 
 /**
- * 知识库去重（简化版：找到重复就标记）
- */
-export async function checkAgainstVault(
-  vault: Vault,
-  notes: AtomicNote[],
-  targetFolder: string,
-  cacheManager: DedupCacheManager = defaultDedupCache,
-): Promise<DedupResult> {
-  const uniqueNotes: AtomicNote[] = [];
-  const duplicates: DuplicateInfo[] = [];
-
-  // 获取或构建知识库语料
-  let existingNotes: CachedNote[];
-  let idfTable: IdfTable;
-  const cached = cacheManager.get(targetFolder, vault);
-
-  if (cached) {
-    existingNotes = cached.notes;
-    idfTable = cached.idfTable;
-  } else {
-    const result = await loadAndPreprocessExistingNotes(vault, targetFolder);
-    existingNotes = result.notes;
-    idfTable = result.idfTable;
-    cacheManager.set(targetFolder, existingNotes, idfTable);
-  }
-
-  // 将新笔记 token 化（使用同一个 IDF 表，保持语义空间一致）
-  const newNoteTokens = notes.map(n => tokenize(n.content));
-  const newNoteVectors = newNoteTokens.map(tokens => computeTfIdfVector(tokens, idfTable));
-
-  const LENGTH_RATIO_THRESHOLD = 0.3;
-
-  for (let i = 0; i < notes.length; i++) {
-    const note = notes[i];
-    const vec = newNoteVectors[i];
-    const length = note.content.length;
-    let isDuplicate = false;
-    let bestMatch: DuplicateInfo | null = null;
-
-    for (const existing of existingNotes) {
-      // 长度预过滤
-      if (Math.abs(length - existing.content.length) / Math.max(length, existing.content.length) > LENGTH_RATIO_THRESHOLD) {
-        continue;
-      }
-
-      const similarity = cosineSimilarity(vec, existing.vector);
-      if (similarity > SIMILARITY_THRESHOLD) {
-        isDuplicate = true;
-        bestMatch = {
-          isDuplicate: true,
-          similarity,
-          matchedNote: existing.path,
-          matchedContent: existing.content.slice(0, 200) + '...',
-        };
-        break;
-      }
-    }
-
-    if (isDuplicate && bestMatch) {
-      duplicates.push(bestMatch);
-    } else {
-      uniqueNotes.push(note);
-    }
-  }
-
-  return {
-    uniqueNotes,
-    removedCount: notes.length - uniqueNotes.length,
-    duplicates,
-  };
-}
-
-/**
  * 知识库去重（详细版：返回每条笔记的最佳匹配，支持标题加权）
  *
  * 综合相似度 = 标题余弦 * 0.25 + 内容余弦 * 0.75
@@ -519,10 +385,6 @@ export async function checkAgainstVaultDetailed(
     newNoteVectors.push({ vec, titleVec, length: note.content.length });
   }
 
-  const LENGTH_RATIO_THRESHOLD = 0.3;
-  const TITLE_WEIGHT = 0.25;
-  const CONTENT_WEIGHT = 0.75;
-  const SHORT_NOTE_LENGTH = 100;
   const results: VaultMatchInfo[] = [];
 
   for (let idx = 0; idx < notes.length; idx++) {

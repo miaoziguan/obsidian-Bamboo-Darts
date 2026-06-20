@@ -48,7 +48,6 @@ const context = await esbuild.context({
     "path",
     "fs",
     "os",
-    "crypto",
   ],
   format: "cjs",
   target: "es2018",

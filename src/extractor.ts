@@ -4,22 +4,24 @@
  * - Phase 2: 质量门控
  * - Phase 3: 提炼原子笔记（AI 模式）
  * - Phase 4: 同批交叉去重
- * - Phase 5: 事实核查（可选）
+ * - Phase 5: 内容核查（可选，三层管线：原文溯源→语义比对→超源标记）
  * - Phase 6: 笔记复查（可选）
  */
 
 import { requestUrl, Vault } from 'obsidian';
 import { runGateChecks } from './utils/gate-rules';
 import { parseAINoteOutput, AtomicNote, validateAtomicNote, ensureTags } from './utils/notes-standards';
-import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo } from './deduplicator';
+import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult, DuplicateInfo } from './deduplicator';
 import { buildSystemPrompt, buildExtractionPrompt } from './extraction/tag-preferences';
-import { verifyFacts, verifyData } from './extraction/fact-checker';
+import { classifyContent, resolveProfileConfig, PROFILE_LABELS, ContentProfile, ProfileConfig } from './extraction/profiles';
+import { verifyClaims } from './extraction/fact-checker';
 import { reviewNotes, ReviewConfig } from './review/note-reviewer';
 import { extractUrlContent } from './extraction/url-extractor';
+import { extractChunked } from './extraction/chunked-extractor';
 import { AI_TEMPERATURE, INPUT_TRUNCATE_LENGTH } from './constants';
 import { ProgressCallback, ProgressEvent, createProgressTracker, ProgressTracker } from './extraction/progress';
 
-interface ExtractorConfig {
+export interface ExtractorConfig {
   deepseekApiKey: string;
   deepseekApiUrl: string;
   model: string;
@@ -28,7 +30,6 @@ interface ExtractorConfig {
   tagMode: 'lenient' | 'strict';
   factCheck: boolean;
   verifiedOnly: boolean;
-  enableDataCheck: boolean;
   enableReview: boolean;
   reviewModel: string;
   reviewApiUrl: string;
@@ -40,18 +41,23 @@ interface ExtractorConfig {
   enableVaultDedup?: boolean;
   // 进度回调
   onProgress?: ProgressCallback;
+  // Profile 策略
+  profile?: ContentProfile;
+  autoClassify?: boolean;
+  profileConfigs?: Partial<Record<ContentProfile, Partial<ProfileConfig>>>;
+  // 深度提炼
+  enableDeepMode?: boolean;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
   deepseekApiKey: '',
   deepseekApiUrl: 'https://api.deepseek.com/v1/chat/completions',
   model: 'deepseek-v4-flash',
-  maxTokens: 2000,
+  maxTokens: 6000,
   tagPreferences: [],
   tagMode: 'lenient',
   factCheck: false,
   verifiedOnly: false,
-  enableDataCheck: true,
   enableReview: false,
   reviewModel: '',
   reviewApiUrl: '',
@@ -142,7 +148,7 @@ async function readContent(
 /**
  * Phase 3: 提炼原子笔记（调用 DeepSeek API）
  */
-async function extractAtomicNotes(
+export async function extractAtomicNotes(
   content: string,
   config: Partial<ExtractorConfig> = {}
 ): Promise<{ success: boolean; notes?: AtomicNote[]; error?: string }> {
@@ -237,8 +243,10 @@ export interface ExtractionResult {
   notes?: AtomicNote[];
   steps: Step[];
   error?: string;
-  factCheckSummary?: { verified: number; doubtful: number; unverified: number };
-  dataCheckSummary?: { consistent: number; deviation: number; unverifiable: number };
+  detectedProfile?: ContentProfile;
+  profileSource?: 'auto' | 'manual';
+  crossBatchDuplicates?: DuplicateInfo[];
+  verificationSummary?: { traced: number; needsCompare: number; outOfScope: number };
   vaultDedupResult?: DedupResult;
   vaultDedupPending?: PendingDuplicate[];
   // 疑似重复提示（中相似度），供 main.ts 判断是否走"确认后保存"流程
@@ -298,9 +306,39 @@ export async function runExtraction(
     tracker.complete('通过');
   }
 
-  // Phase 3: 提炼原子笔记（AI 模式）
-  tracker.start('Phase 3', '提炼原子笔记', '正在调用 DeepSeek API...');
-  const extractResult = await extractAtomicNotes(truncatedContent, config);
+  // Profile 分类：自动判断或手动指定
+  let detectedProfile: ContentProfile;
+  let profileSource: 'auto' | 'manual';
+
+  if (fullConfig.profile) {
+    detectedProfile = fullConfig.profile;
+    profileSource = 'manual';
+  } else if (fullConfig.autoClassify !== false) {
+    detectedProfile = classifyContent(content);
+    profileSource = 'auto';
+  } else {
+    detectedProfile = 'balanced';
+    profileSource = 'manual';
+  }
+
+  const activeProfileConfig = resolveProfileConfig(detectedProfile, fullConfig.profileConfigs);
+  tracker.complete(`策略: ${PROFILE_LABELS[detectedProfile]} (${profileSource === 'auto' ? '自动检测' : '手动指定'})`);
+
+  // Phase 3: 提炼原子笔记（AI 模式 / 深度模式）
+  let extractResult: { success: boolean; notes?: AtomicNote[]; error?: string };
+
+  if (fullConfig.enableDeepMode && content.length > INPUT_TRUNCATE_LENGTH) {
+    tracker.start('Phase 3', '提炼原子笔记（深度模式）', `文本 ${content.length} 字，分段提炼中...`);
+    const chunkedNotes = await extractChunked(content, config, fullConfig.onProgress);
+    if (chunkedNotes.length === 0) {
+      extractResult = { success: false, error: '深度提炼未产出任何笔记' };
+    } else {
+      extractResult = { success: true, notes: chunkedNotes };
+    }
+  } else {
+    tracker.start('Phase 3', '提炼原子笔记', '正在调用 DeepSeek API...');
+    extractResult = await extractAtomicNotes(truncatedContent, config);
+  }
 
   if (!extractResult.success) {
     tracker.fail(extractResult.error || '提炼失败');
@@ -312,7 +350,7 @@ export async function runExtraction(
 
   // Phase 4: 同批交叉去重
   tracker.start('Phase 4', '同批交叉去重', '开始去重...');
-  const dedupResult = crossCheckBatch(notes);
+  const dedupResult = crossCheckBatch(notes, activeProfileConfig.crossBatchThreshold);
   tracker.complete(`去重后剩余 ${dedupResult.uniqueNotes.length} 条（去除 ${notes.length - dedupResult.uniqueNotes.length} 条重复）`);
   notes = dedupResult.uniqueNotes;
 
@@ -339,9 +377,9 @@ export async function runExtraction(
       fullConfig.targetFolder || ''
     );
 
-    // TF-IDF + 余弦相似度的阈值（比旧 Jaccard 阈值略低，因为余弦对短文本更"宽容"）
-    const HIGH_SIM_THRESHOLD = 0.70;
-    const MID_SIM_THRESHOLD = 0.55;
+    // 使用 Profile 策略的阈值
+    const HIGH_SIM_THRESHOLD = activeProfileConfig.vaultHighThreshold;
+    const MID_SIM_THRESHOLD = activeProfileConfig.vaultMidThreshold;
 
     const keptNotes: AtomicNote[] = [];
     const highDupCount = matchInfos.filter(m => m.bestMatch && m.bestMatch.similarity >= HIGH_SIM_THRESHOLD).length;
@@ -395,12 +433,12 @@ export async function runExtraction(
     return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
   }
 
-  // Phase 5: 事实核查（可选）
-  let factCheckSummary: { verified: number; doubtful: number; unverified: number } | undefined;
+  // Phase 5: 内容核查（可选）—— 三层管线：原文溯源 → 语义比对 → 超源标记
+  let verificationSummary: { traced: number; needsCompare: number; outOfScope: number } | undefined;
 
   if (fullConfig.factCheck) {
-    tracker.start('Phase 5', '事实核查', '正在核实关键事实...');
-    const factResult = await verifyFacts(truncatedContent, notes, {
+    tracker.start('Phase 5', '内容核查', '正在溯源和比对...');
+    const verifyResult = await verifyClaims(truncatedContent, notes, {
       deepseekApiKey: fullConfig.deepseekApiKey,
       deepseekApiUrl: fullConfig.deepseekApiUrl,
       model: fullConfig.model,
@@ -408,10 +446,10 @@ export async function runExtraction(
       signal: fullConfig.signal,
     });
 
-    factCheckSummary = { verified: factResult.verified, doubtful: factResult.doubtful, unverified: factResult.unverified };
+    verificationSummary = { traced: verifyResult.traced, needsCompare: verifyResult.needsCompare, outOfScope: verifyResult.outOfScope };
 
-    if (factResult.error) {
-      tracker.fail(`核查出错: ${factResult.error}`);
+    if (verifyResult.error) {
+      tracker.fail(`核查出错: ${verifyResult.error}`);
     } else {
       if (fullConfig.verifiedOnly) {
         const originalCount = notes.length;
@@ -423,7 +461,7 @@ export async function runExtraction(
         notes = notes.filter(note => {
           const v = note.verification;
           if (!v || v.length === 0) return true;
-          return !v.some(r => r.status === '无据');
+          return !v.some(r => r.status === '超源');
         });
 
         // 基于标题重建新数组中的索引映射
@@ -442,47 +480,17 @@ export async function runExtraction(
             newNoteIndex: postFilterIndexMap.get(p.newNoteTitle)!,
           }));
 
-        tracker.complete(`${notes.length} 条笔记中：有据 ${factResult.verified} 条，存疑 ${factResult.doubtful} 条，无据 ${factResult.unverified} 条（过滤无据：${originalCount} → ${notes.length}）`);
+        tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}（过滤超源：${originalCount} → ${notes.length}）`);
       } else {
-        tracker.complete(`${notes.length} 条笔记中：有据 ${factResult.verified} 条，存疑 ${factResult.doubtful} 条，无据 ${factResult.unverified} 条`);
+        tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}`);
       }
     }
   } else {
-    tracker.start('Phase 5', '事实核查', '未启用');
+    tracker.start('Phase 5', '内容核查', '未启用');
     tracker.skip('未启用，跳过');
   }
 
-  // 取消检查点（Phase 5 → 5b）
-  if (fullConfig.signal?.aborted) {
-    tracker.fail('已取消');
-    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
-  }
-
-  // Phase 5b: 数据核查（可选）
-  let dataCheckSummary: { consistent: number; deviation: number; unverifiable: number } | undefined;
-
-  if (fullConfig.enableDataCheck) {
-    tracker.start('Phase 5b', '数据核查', '正在核查数据准确性...');
-    const dataResult = await verifyData(truncatedContent, notes, {
-      deepseekApiKey: fullConfig.deepseekApiKey,
-      deepseekApiUrl: fullConfig.deepseekApiUrl,
-      model: fullConfig.model,
-      signal: fullConfig.signal,
-    });
-
-    dataCheckSummary = { consistent: dataResult.consistent, deviation: dataResult.deviation, unverifiable: dataResult.unverifiable };
-
-    if (dataResult.error) {
-      tracker.fail(`数据核查出错: ${dataResult.error}`);
-    } else {
-      tracker.complete(`数据点核查：一致 ${dataResult.consistent} 个，偏差 ${dataResult.deviation} 个，无法验证 ${dataResult.unverifiable} 个`);
-    }
-  } else {
-    tracker.start('Phase 5b', '数据核查', '未启用');
-    tracker.skip('未启用，跳过');
-  }
-
-  // 取消检查点（Phase 5b → 6）
+  // 取消检查点（Phase 5 → 6）
   if (fullConfig.signal?.aborted) {
     tracker.fail('已取消');
     return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '用户取消了提炼' };
@@ -498,6 +506,7 @@ export async function runExtraction(
       model: fullConfig.reviewModel || fullConfig.model,
       maxTokens: fullConfig.maxTokens,
       signal: fullConfig.signal,
+      minScore: activeProfileConfig.reviewMinScore,
     };
 
     const reviewResult = await reviewNotes(notes, reviewConfig);
@@ -561,8 +570,10 @@ export async function runExtraction(
     success: true,
     notes,
     steps: eventsToSteps(tracker.allEvents()),
-    factCheckSummary,
-    dataCheckSummary,
+    detectedProfile,
+    profileSource,
+    crossBatchDuplicates: dedupResult.duplicates.length > 0 ? dedupResult.duplicates : undefined,
+    verificationSummary,
     vaultDedupResult,
     vaultDedupPending: vaultDedupPending.length > 0 ? vaultDedupPending : undefined,
     duplicateHints,

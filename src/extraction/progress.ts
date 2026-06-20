@@ -26,8 +26,6 @@ export interface ProgressEvent {
 
 export type ProgressCallback = (event: ProgressEvent, allEvents: ProgressEvent[], totalElapsedMs: number) => void;
 
-export type SubProgressCallback = (current: number, total: number, label?: string) => void;
-
 // === ProgressTracker：封装阶段生命周期 ===
 
 export interface ProgressTracker {
@@ -107,14 +105,4 @@ export function createProgressTracker(onProgress?: ProgressCallback | null): Pro
   };
 
   return { start, update, complete, skip, fail, finish, currentIndex: () => currentIdx, allEvents: () => events.slice() };
-}
-
-/** 把一个 ProgressCallback 包装成只报告子进度的 SubProgressCallback */
-export function wrapAsSubProgress(tracker: ProgressTracker, baseLabel = ''): SubProgressCallback {
-  return (current, total, label) => {
-    tracker.update({
-      subProgress: { current, total, label: label || baseLabel },
-      detail: baseLabel ? `${baseLabel} ${current}/${total}` : `进度 ${current}/${total}`,
-    });
-  };
 }
