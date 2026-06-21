@@ -398,7 +398,11 @@ export class ResultModal extends Modal {
       // 相似度提示
       const simPercent = (item.similarity * 100).toFixed(1);
       const simColor = isHigh ? 'var(--color-red)' : 'var(--text-accent)';
-      const simLabel = isHigh ? `⚠ 相似度 ${simPercent}%（高）` : `相似度 ${simPercent}%`;
+      let simLabel = isHigh ? `⚠ 本地 ${simPercent}%（高）` : `本地 ${simPercent}%`;
+      if (item.semanticSimilarity !== undefined) {
+        const semPercent = (item.semanticSimilarity * 100).toFixed(1);
+        simLabel += ` / 语义 ${semPercent}%`;
+      }
       card.createEl('div', {
         text: simLabel,
         attr: { style: `font-size:12px;color:${simColor};font-weight:600;margin-bottom:6px` },

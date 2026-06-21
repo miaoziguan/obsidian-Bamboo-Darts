@@ -8,6 +8,7 @@ import { App, PluginSettingTab, Setting, Notice, requestUrl } from 'obsidian';
 import AtomicNotesPlugin from '../main';
 import { ExtractionHistoryEntry } from '../services/history-service';
 import { ContentProfile, ProfileConfig, PROFILE_CONFIGS, PROFILE_LABELS } from '../extraction/profiles';
+import { HUNYUAN_EMBEDDING_URL, SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT, SEMANTIC_THRESHOLD_MIN, SEMANTIC_THRESHOLD_MAX, SEMANTIC_THRESHOLD_STEP } from '../constants';
 
 export interface PluginSettings {
   // 设置版本号（用于迁移）
@@ -65,6 +66,12 @@ export interface PluginSettings {
   // 高级参数
   /** 输入文本截断长度（默认 10000 字） */
   inputTruncateLength: number;
+
+  // 语义去重（Beta）— 腾讯混元向量模型
+  enableSemanticDedup?: boolean;
+  hunyuanApiKey?: string;
+  hunyuanApiUrl?: string;
+  semanticSimilarityThreshold?: number;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -105,6 +112,12 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
   // 高级参数
   inputTruncateLength: 10000,
+
+  // 语义去重（Beta）
+  enableSemanticDedup: false,
+  hunyuanApiKey: '',
+  hunyuanApiUrl: '',
+  semanticSimilarityThreshold: 0.82,
 };
 
 export class AtomicNotesSettingTab extends PluginSettingTab {
@@ -269,6 +282,109 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    this.addDivider(containerEl);
+
+    // ================================================================
+    // ③ 语义去重（Beta）— 腾讯混元向量模型
+    // ================================================================
+    containerEl.createEl('h3', { text: '语义去重（Beta）' });
+
+    const semToggle = new Setting(containerEl)
+      .setName('启用语义去重')
+      .setDesc('使用腾讯混元向量模型检测"换说法但意思相同"的重复笔记。需要填写下方混元 API Key。')
+      .addToggle(toggle =>
+        toggle
+          .setValue(!!this.plugin.settings.enableSemanticDedup)
+          .onChange(async value => {
+            this.plugin.settings.enableSemanticDedup = value;
+            await this.plugin.saveSettings();
+            this.display();
+          })
+      );
+
+    if (this.plugin.settings.enableSemanticDedup) {
+      new Setting(containerEl)
+        .setName('混元 API Key')
+        .setDesc('腾讯混元 API Key（必需）')
+        .addText(text => {
+          text
+            .setPlaceholder('sk-...')
+            .setValue(this.plugin.settings.hunyuanApiKey || '')
+            .onChange(async value => {
+              this.plugin.settings.hunyuanApiKey = value.trim();
+              await this.plugin.saveSettings();
+            });
+          text.inputEl.type = 'password';
+        })
+        .addButton(btn =>
+          btn.setButtonText('获取 Key')
+            .setTooltip('前往腾讯混元官网注册并获取 API Key')
+            .onClick(() => {
+              window.open('https://hunyuan.tencent.com/portal/guide', '_blank');
+            })
+        );
+
+      new Setting(containerEl)
+        .setName('混元 API URL（可选）')
+        .setDesc('留空则使用默认地址')
+        .addText(text =>
+          text
+            .setPlaceholder(HUNYUAN_EMBEDDING_URL)
+            .setValue(this.plugin.settings.hunyuanApiUrl || '')
+            .onChange(async value => {
+              this.plugin.settings.hunyuanApiUrl = value.trim();
+              await this.plugin.saveSettings();
+            })
+        );
+
+      new Setting(containerEl)
+        .setName('语义相似度阈值')
+        .setDesc(`高于此值判定为重复。值越高越严格（默认 ${SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT}）`)
+        .addSlider(s =>
+          s.setLimits(SEMANTIC_THRESHOLD_MIN, SEMANTIC_THRESHOLD_MAX, SEMANTIC_THRESHOLD_STEP)
+            .setValue(this.plugin.settings.semanticSimilarityThreshold || SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT)
+            .setDynamicTooltip()
+            .onChange(async v => {
+              this.plugin.settings.semanticSimilarityThreshold = v;
+              await this.plugin.saveSettings();
+            })
+        );
+
+      // 「预构建向量索引」按钮
+      new Setting(containerEl)
+        .setName('预构建向量索引')
+        .setDesc('首次开启语义去重时，建议先构建索引，避免提炼时意外触发大量 API 调用。')
+        .addButton(btn =>
+          btn.setButtonText('开始构建')
+            .setCta()
+            .onClick(async () => {
+              await this.plugin.rebuildVectorIndex();
+              this.display();
+            })
+        );
+
+      // 「清空向量缓存」按钮
+      new Setting(containerEl)
+        .setName('清空向量缓存')
+        .setDesc('删除所有已缓存的向量数据，下次提炼时重新计算。')
+        .addButton(btn =>
+          btn.setButtonText('清空缓存')
+            .onClick(async () => {
+              const cacheFile = this.plugin.manifest?.dir
+                ? `${this.plugin.manifest.dir}/vector-cache.json`
+                : `${this.plugin.app.vault.configDir}/plugins/atomic-notes-extractor/vector-cache.json`;
+              const adapter = this.plugin.app.vault.adapter;
+              if (await adapter.exists(cacheFile)) {
+                await adapter.remove(cacheFile);
+                new Notice('向量缓存已清空，下次提炼时将重新构建。');
+              } else {
+                new Notice('暂无向量缓存文件。');
+              }
+              this.display();
+            })
+        );
+    }
 
     this.addDivider(containerEl);
 

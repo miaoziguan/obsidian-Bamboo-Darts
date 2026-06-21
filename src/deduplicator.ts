@@ -24,6 +24,7 @@ import {
   BM25_K1, BM25_B, SIMHASH_HAMMING_THRESHOLD,
 } from './constants';
 import { simhash, hammingDistance } from './utils/simhash';
+import { SemanticDedupManager } from './utils/embedding';
 
 // ─── Token 化 ───
 
@@ -154,6 +155,8 @@ export interface DuplicateInfo {
   matchedContent?: string;
   removedTitle: string;
   removedContent: string;
+  /** 语义相似度（启用语义去重时才有值） */
+  semanticSimilarity?: number;
 }
 
 export interface DedupResult {
@@ -170,6 +173,10 @@ export interface VaultMatchInfo {
     path: string;
     content: string;
   } | null;
+  /** 语义相似度（启用语义去重时才有值） */
+  semanticSimilarity?: number;
+  /** 语义匹配路径（本地无匹配、语义超阈值时填入 bestMatch） */
+  semanticMatchPath?: string;
 }
 
 // ─── 缓存 ───
@@ -232,7 +239,7 @@ const defaultDedupCache = new DedupCacheManager();
 
 // ─── 辅助：路径边界检查 ───
 
-function isPathInFolder(filePath: string, targetFolder: string): boolean {
+export function isPathInFolder(filePath: string, targetFolder: string): boolean {
   if (!targetFolder) return false;
   const normalized = targetFolder.endsWith('/') ? targetFolder.slice(0, -1) : targetFolder;
   if (filePath === normalized) return true;
@@ -440,6 +447,7 @@ export async function checkAgainstVaultDetailed(
   notes: AtomicNote[],
   targetFolder: string,
   cacheManager: DedupCacheManager = defaultDedupCache,
+  semanticManager?: SemanticDedupManager,
 ): Promise<VaultMatchInfo[]> {
   // 获取或构建知识库语料
   let existingNotes: CachedNote[];
@@ -525,6 +533,51 @@ export async function checkAgainstVaultDetailed(
     }
 
     results.push({ note, noteIndex: idx, bestMatch });
+  }
+
+  // 语义去重（Beta）：用混元向量模型精判
+  if (semanticManager) {
+    // 获取知识库文件列表
+    const allFiles = vault.getMarkdownFiles();
+    const vaultFiles = allFiles.filter(f => isPathInFolder(f.path, targetFolder));
+
+    // 构造预加载参数（含懒加载的内容读取回调）
+    const preloadItems = vaultFiles.map(f => ({
+      path: f.path,
+      mtime: f.stat.mtime,
+      getContent: async () => await vault.read(f),
+    }));
+
+    // 预加载知识库向量（缓存，仅首次有 API 调用）
+    const vaultVectors = await semanticManager.preloadVaultVectors(preloadItems);
+
+    // 批量获取新笔记的语义最佳匹配
+    const newContents = notes.map(n => n.content);
+    const semanticMatches = await semanticManager.findBestMatches(newContents, vaultVectors);
+
+    // 用语义匹配结果增强本地结果
+    for (let idx = 0; idx < results.length; idx++) {
+      const semMatch = semanticMatches[idx];
+      if (!semMatch) continue;
+
+      // 记录语义相似度（供 UI 展示，不改变本地综合评分）
+      results[idx].semanticSimilarity = semMatch.similarity;
+
+      // 仅当本地无匹配时，用语义结果补充（语义已在内部门槛过滤）
+      if (!results[idx].bestMatch) {
+        const matchedFile = vault.getAbstractFileByPath(semMatch.path);
+        let matchedContent = '';
+        if (matchedFile instanceof TFile) {
+          matchedContent = await vault.read(matchedFile);
+        }
+        results[idx].bestMatch = {
+          similarity: semMatch.similarity,
+          path: semMatch.path,
+          content: matchedContent.slice(0, 200) + (matchedContent.length > 200 ? '...' : ''),
+        };
+        results[idx].semanticMatchPath = semMatch.path;
+      }
+    }
   }
 
   return results;

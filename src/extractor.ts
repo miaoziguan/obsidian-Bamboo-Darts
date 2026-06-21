@@ -12,6 +12,7 @@ import { requestUrl, Vault } from 'obsidian';
 import { runGateChecks } from './gate';
 import { AtomicNote } from './utils/notes-standards';
 import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult, DuplicateInfo } from './deduplicator';
+import { SemanticDedupManager, isSemanticDedupEnabled } from './utils/embedding';
 import { classifyContent, resolveProfileConfig, ContentProfile, ProfileConfig } from './extraction/profiles';
 import { verifyClaims } from './extraction/fact-checker';
 import { reviewNotes, ReviewConfig, ReviewResult } from './review/note-reviewer';
@@ -83,7 +84,9 @@ async function runVaultDedupPhase(
   const matchInfos: VaultMatchInfo[] = await checkAgainstVaultDetailed(
     config.vault,
     notes,
-    config.dedupTargetFolder?.trim() || config.targetFolder || ''
+    config.dedupTargetFolder?.trim() || config.targetFolder || '',
+    defaultDedupCache,
+    config.semanticManager,
   );
 
   const HIGH_SIM_THRESHOLD = profileConfig.vaultHighThreshold;
@@ -108,6 +111,7 @@ async function runVaultDedupPhase(
         newNoteTitle: info.note.title,
         newNoteContent: info.note.content,
         highSimilarity: true,
+        semanticSimilarity: info.semanticSimilarity,
       });
     } else if (info.bestMatch.similarity >= MID_SIM_THRESHOLD) {
       // 中相似度：保留笔记，但标记为待确认
@@ -119,6 +123,7 @@ async function runVaultDedupPhase(
         newNoteIndex: info.noteIndex,
         newNoteTitle: info.note.title,
         newNoteContent: info.note.content,
+        semanticSimilarity: info.semanticSimilarity,
       });
     } else {
       keptNotes.push(info.note);
@@ -135,6 +140,7 @@ async function runVaultDedupPhase(
         similarity: m.bestMatch!.similarity,
         matchedNote: m.bestMatch!.path,
         matchedContent: m.bestMatch!.content,
+        semanticSimilarity: m.semanticSimilarity,
       })),
   };
 
@@ -267,6 +273,8 @@ export interface ExtractorConfig {
   skipGate?: boolean;
   /** 输入文本截断长度（覆盖默认常量） */
   inputTruncateLength?: number;
+  /** 语义去重管理器实例（由 main.ts 创建并传入） */
+  semanticManager?: SemanticDedupManager;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
@@ -283,6 +291,11 @@ const DEFAULT_CONFIG: ExtractorConfig = {
   reviewApiUrl: '',
   reviewApiKey: '',
   enableVaultDedup: true,
+  // 语义去重（Beta）
+  enableSemanticDedup: false,
+  hunyuanApiKey: '',
+  hunyuanApiUrl: '',
+  semanticSimilarityThreshold: 0.82,
 };
 
 // ─── Step 日志工具（向后兼容） ───
@@ -433,6 +446,8 @@ export interface PendingDuplicate {
   newNoteContent: string;
   /** 是否为高相似度（>= vaultHighThreshold），用于 UI 红色警示 */
   highSimilarity?: boolean;
+  /** 语义相似度（启用语义去重时才有值） */
+  semanticSimilarity?: number;
 }
 
 export async function runExtraction(

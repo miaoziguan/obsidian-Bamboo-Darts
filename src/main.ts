@@ -7,6 +7,7 @@
 import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, Modal, App } from 'obsidian';
 import { AtomicNotesSettingTab, PluginSettings, DEFAULT_SETTINGS } from './ui/setting-tab';
 import { runExtraction } from './extractor';
+import { isPathInFolder } from './deduplicator';
 import { stripImageNoise } from './utils/clipboard';
 import { saveNotes } from './storage';
 import { AtomicNote } from './utils/notes-standards';
@@ -17,6 +18,7 @@ import { AtomicNotesPanel, VIEW_TYPE_ATOMIC_PANEL } from './ui/panel-view';
 import { computeSourceHash, getSourceTitle, addHistoryEntry, findPreviousExtraction } from './services/history-service';
 import { insertBacklinks } from './services/backlink-service';
 import { ProgressCallback, ProgressEvent } from './extraction/progress';
+import { SemanticDedupManager, EmbeddingCacheData, CachePersistence } from './utils/embedding';
 
 /** 友好化常见的 API 错误信息 */
 function friendlyError(error: unknown): string {
@@ -36,6 +38,7 @@ function friendlyError(error: unknown): string {
 export default class AtomicNotesPlugin extends Plugin {
   settings: PluginSettings;
   _isExtracting: boolean = false;
+  private _isBuildingIndex: boolean = false;
   private _abortController: AbortController | null = null;
   private _progressModal: Modal | null = null;
 
@@ -330,6 +333,39 @@ export default class AtomicNotesPlugin extends Plugin {
       this._progressModal = m;
       progressCb = (event, allEvents, totalMs) => m.update(event, allEvents, totalMs);
     }
+
+    // 创建语义去重管理器（如果启用）
+    let semanticManager: SemanticDedupManager | undefined = undefined;
+    if (this._isBuildingIndex) {
+      new Notice('向量索引正在构建中，本次提炼跳过语义去重');
+    } else if (this.settings.enableSemanticDedup && this.settings.hunyuanApiKey) {
+      const pluginDir = this.manifest?.dir || `${this.app.vault.configDir}/plugins/atomic-notes-extractor`;
+      const cacheFile = `${pluginDir}/vector-cache.json`;
+      const adapter = this.app.vault.adapter;
+      const cachePersistence: CachePersistence = {
+        load: async (): Promise<EmbeddingCacheData> => {
+          try {
+            if (await adapter.exists(cacheFile)) {
+              const raw = await adapter.read(cacheFile);
+              return JSON.parse(raw);
+            }
+          } catch { /* ignore */ }
+          return { version: 1, embeddings: {} };
+        },
+        save: async (data: EmbeddingCacheData): Promise<void> => {
+          await adapter.write(cacheFile, JSON.stringify(data));
+        },
+      };
+      semanticManager = new SemanticDedupManager(
+        {
+          apiKey: this.settings.hunyuanApiKey,
+          apiUrl: this.settings.hunyuanApiUrl || undefined,
+          similarityThreshold: this.settings.semanticSimilarityThreshold,
+        },
+        cachePersistence,
+      );
+    }
+
     try {
       const result = await runExtraction(input, {
         deepseekApiKey: this.settings.deepseekApiKey,
@@ -364,6 +400,8 @@ export default class AtomicNotesPlugin extends Plugin {
         inputTruncateLength: this.settings.inputTruncateLength,
         // 强制提炼（跳过门控）
         skipGate: opts.skipGate,
+        // 语义去重管理器
+        semanticManager: semanticManager,
       });
       if (!result.success || !result.notes) {
         if (result.error && result.error.includes('取消')) {
@@ -393,6 +431,123 @@ export default class AtomicNotesPlugin extends Plugin {
       this._abortController = null;
       this._progressModal = null;
       closeProgressModal();
+    }
+  }
+
+  async rebuildVectorIndex() {
+    if (this._isBuildingIndex) {
+      new Notice('向量索引构建正在进行中，请等待完成后再试');
+      return;
+    }
+    if (!this.settings.enableSemanticDedup || !this.settings.hunyuanApiKey) {
+      new Notice('请先在设置中启用语义去重并填写混元 API Key');
+      return;
+    }
+
+    this._isBuildingIndex = true;
+    const targetFolder = this.settings.dedupTargetFolder?.trim() || this.settings.targetFolder || '原子笔记';
+    const allFiles = this.app.vault.getMarkdownFiles();
+    const files = allFiles.filter(f => isPathInFolder(f.path, targetFolder));
+    if (files.length === 0) {
+      new Notice(`目标文件夹 "${targetFolder}" 中没有 Markdown 文件`);
+      return;
+    }
+
+    // 创建进度弹窗
+    const modal = new (class extends Modal {
+      _title!: HTMLElement;
+      _body!: HTMLElement;
+      constructor(app: App) {
+        super(app);
+      }
+      onOpen() {
+        this.containerEl.style.zIndex = '1000';
+        this.modalEl.style.minWidth = '280px';
+        this.modalEl.style.maxWidth = '420px';
+        this._title = this.contentEl.createEl('div', {
+          attr: { style: 'font-weight:bold;font-size:13px;margin-bottom:8px' },
+          text: '正在构建向量索引...',
+        });
+        this._body = this.contentEl.createEl('div', {
+          attr: { style: 'font-size:12px;color:var(--text-muted);line-height:1.6' },
+        });
+      }
+      update(processed: number, total: number, fromCache: number, fetched: number) {
+        this._title.setText(`向量索引构建中 ${processed}/${total}`);
+        this._body.empty();
+        this._body.createEl('div', { text: `📦 命中缓存：${fromCache} 个` });
+        this._body.createEl('div', { text: `🔄 正在处理：${fetched} 个（API 调用中）` });
+        if (processed === total) {
+          this._body.createEl('div', { text: `✅ 全部完成！`, attr: { style: 'color:var(--text-success);margin-top:6px' } });
+        }
+      }
+      onClose() { this.contentEl.empty(); }
+    })(this.app);
+    modal.open();
+
+    try {
+      // 创建 SemanticDedupManager
+      const cacheFile = this.manifest?.dir
+        ? `${this.manifest.dir}/vector-cache.json`
+        : `${this.app.vault.configDir}/plugins/atomic-notes-extractor/vector-cache.json`;
+      const adapter = this.app.vault.adapter;
+      const cachePersistence = {
+        load: async (): Promise<EmbeddingCacheData> => {
+          try {
+            if (await adapter.exists(cacheFile)) {
+              const raw = await adapter.read(cacheFile);
+              return JSON.parse(raw);
+            }
+          } catch { /* ignore */ }
+          return { version: 1, embeddings: {} };
+        },
+        save: async (data: EmbeddingCacheData): Promise<void> => {
+          await adapter.write(cacheFile, JSON.stringify(data));
+        },
+      };
+      const semanticManager = new SemanticDedupManager(
+        {
+          apiKey: this.settings.hunyuanApiKey,
+          apiUrl: this.settings.hunyuanApiUrl || undefined,
+          similarityThreshold: this.settings.semanticSimilarityThreshold,
+        },
+        cachePersistence,
+      );
+
+      // 准备 preloadItems
+      const preloadItems = files.map(f => ({
+        path: f.path,
+        mtime: f.stat.mtime,
+        getContent: async () => await this.app.vault.read(f),
+      }));
+
+      // 跟踪进度数据（供下方 Notice 使用）
+      let lastFromCache = 0;
+      let lastFetched = 0;
+
+      // 调用 preloadVaultVectors，传入进度回调
+      await semanticManager.preloadVaultVectors(preloadItems, (processed, total, fromCache, fetched) => {
+        lastFromCache = fromCache;
+        lastFetched = fetched;
+        modal.update(processed, total, fromCache, fetched);
+      });
+
+      // 清理失效缓存（文件已删除/移动/重命名，对应缓存条目无用）
+      const validFiles = files.map(f => ({ path: f.path, mtime: f.stat.mtime }));
+      const cleaned = await semanticManager.cleanStaleCache(validFiles);
+      if (cleaned > 0) {
+        console.log(`[Bamboo Darts] 清理了 ${cleaned} 条失效向量缓存`);
+      }
+
+      modal.close();
+      new Notice(`向量索引构建完成！共 ${files.length} 个文件，其中 ${lastFromCache} 个来自缓存，${lastFetched} 个新构建`);
+    } catch (error) {
+      modal.close();
+      const errMsg = error instanceof Error ? error.message : String(error);
+      new Notice(`构建失败：${errMsg}`);
+      console.error('[Bamboo Darts] 向量索引构建失败：', error);
+    } finally {
+      this._isBuildingIndex = false;
     }
   }
 
