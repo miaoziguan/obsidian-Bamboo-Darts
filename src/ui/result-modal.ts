@@ -6,6 +6,7 @@
 import { Modal, App, Setting } from 'obsidian';
 import { AtomicNote } from '../utils/notes-standards';
 import { ExtractionResult, PendingDuplicate } from '../extractor';
+import { ReviewResult, scoreGrade } from '../review/note-reviewer';
 import { PROFILE_LABELS, ContentProfile } from '../extraction/profiles';
 import { DedupResult, DuplicateInfo } from '../deduplicator';
 
@@ -93,6 +94,10 @@ export class ResultModal extends Modal {
         this.renderVerificationSummary(contentEl);
       }
 
+      if (this.result.reviewDetails && this.result.reviewDetails.length > 0) {
+        this.renderReviewSummary(contentEl);
+      }
+
       this.renderNotes(contentEl);
     } else {
       const errEl = contentEl.createEl('p', { cls: 'atomic-notes-error' });
@@ -176,6 +181,12 @@ export class ResultModal extends Modal {
 
     const reportEl = container.createEl('div', { cls: 'atomic-notes-dedup-report' });
     reportEl.createEl('div', { text: '去重报告', cls: 'atomic-notes-section-header' });
+
+    // 三层去重统一说明
+    reportEl.createEl('p', {
+      text: '去重分三层：批内去重（本次提炼内部的重复）→ 知识库去重（与已有笔记比对）→ 待确认（相似度在阈值区间，由你决定）',
+      attr: { style: 'font-size:12px;color:var(--text-faint);margin-bottom:8px' },
+    });
 
     if (this.dedupResult.duplicates.length === 0) {
       reportEl.createEl('p', {
@@ -356,26 +367,41 @@ export class ResultModal extends Modal {
     const pending = this.result.vaultDedupPending;
     if (!pending || pending.length === 0) return;
 
+    // 清理旧的重渲染内容（防止点击"全部保留/丢弃"后重复插入）
+    const existingSection = container.querySelector('.atomic-notes-pending-dedup');
+    if (existingSection) existingSection.remove();
+
+    const highCount = pending.filter(p => p.highSimilarity).length;
+    const midCount = pending.length - highCount;
+
     const section = container.createEl('div', { cls: 'atomic-notes-pending-dedup' });
     section.createEl('div', { text: '⚠️ 疑似重复笔记（需确认）', cls: 'atomic-notes-section-header' });
 
+    // 按相似度分组说明
+    const descParts: string[] = [];
+    if (highCount > 0) descParts.push(`${highCount} 条高相似度（极可能重复）`);
+    if (midCount > 0) descParts.push(`${midCount} 条中相似度（需人工判断）`);
     section.createEl('p', {
-      text: `发现 ${pending.length} 条笔记与知识库已有笔记相似度较高（60%-80%），请逐一确认是否保留：`,
+      text: `发现 ${pending.length} 条笔记与知识库已有笔记相似度较高：${descParts.join('，')}。请逐一确认是否保留：`,
       attr: { style: 'color:var(--text-muted);font-size:13px' },
     });
 
     for (const item of pending) {
+      const isHigh = !!item.highSimilarity;
+      const borderColor = isHigh ? 'var(--color-red)' : 'var(--background-modifier-border)';
       const card = section.createEl('div', {
         attr: {
-          style: 'border:1px solid var(--background-modifier-border);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--background-secondary)',
+          style: `border:1px solid ${borderColor};border-radius:8px;padding:12px;margin-bottom:10px;background:var(--background-secondary)`,
         },
       });
 
       // 相似度提示
       const simPercent = (item.similarity * 100).toFixed(1);
+      const simColor = isHigh ? 'var(--color-red)' : 'var(--text-accent)';
+      const simLabel = isHigh ? `⚠ 相似度 ${simPercent}%（高）` : `相似度 ${simPercent}%`;
       card.createEl('div', {
-        text: `相似度 ${simPercent}%`,
-        attr: { style: 'font-size:12px;color:var(--text-accent);font-weight:600;margin-bottom:6px' },
+        text: simLabel,
+        attr: { style: `font-size:12px;color:${simColor};font-weight:600;margin-bottom:6px` },
       });
 
       // 新笔记信息
@@ -495,6 +521,105 @@ export class ResultModal extends Modal {
       text: `超源 ${summary.outOfScope}`,
       cls: 'atomic-notes-verify-chip unverified',
     });
+  }
+
+  /** 3.1 复查评分结果展示（默认折叠） */
+  private renderReviewSummary(container: HTMLElement) {
+    const details = this.result.reviewDetails;
+    if (!details || details.length === 0) return;
+
+    const section = container.createEl('div');
+
+    // 统计概览
+    const kept = details.filter(d => d.verdict === '保留');
+    const discarded = details.filter(d => d.verdict === '丢弃');
+    const avgScore = details.reduce((s, d) => s + d.finalScore, 0) / details.length;
+
+    // 折叠头部（始终可见）
+    const header = section.createEl('div', {
+      attr: {
+        style: 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 0;user-select:none;border-top:1px solid var(--background-modifier-border)',
+      },
+    });
+    const arrow = header.createEl('span', {
+      text: '▶',
+      attr: { style: 'font-size:10px;transition:transform 0.2s;display:inline-block' },
+    });
+    header.createEl('span', {
+      text: '复查评分',
+      attr: { style: 'font-weight:600;font-size:13px' },
+    });
+    header.createEl('span', {
+      text: `均分 ${avgScore.toFixed(1)} · 合格 ${kept.length}${discarded.length > 0 ? ` · 不合 ${discarded.length}` : ''}`,
+      attr: { style: 'font-size:12px;color:var(--text-muted)' },
+    });
+    const hintEl = header.createEl('span', {
+      text: '点击展开',
+      attr: { style: 'font-size:11px;color:var(--text-muted);margin-left:auto' },
+    });
+
+    // 折叠内容
+    const body = section.createEl('div', {
+      attr: { style: 'display:none;border-left:3px solid var(--background-modifier-border);padding-left:12px;margin-top:8px' },
+    });
+
+    let isOpen = false;
+    header.addEventListener('click', () => {
+      isOpen = !isOpen;
+      body.style.display = isOpen ? 'block' : 'none';
+      arrow.style.transform = isOpen ? 'rotate(90deg)' : 'rotate(0deg)';
+      hintEl.textContent = isOpen ? '点击收起' : '点击展开';
+    });
+
+    // 评分概要（展开后可见）
+    const summaryRow = body.createEl('div', { attr: { style: 'display:flex;gap:12px;margin-bottom:8px;font-size:13px' } });
+    summaryRow.createEl('span', { text: `均分 ${avgScore.toFixed(1)}`, attr: { style: 'color:var(--text-accent);font-weight:600' } });
+    summaryRow.createEl('span', { text: `合格 ${kept.length}`, attr: { style: 'color:var(--color-green)' } });
+    if (discarded.length > 0) {
+      summaryRow.createEl('span', { text: `不合 ${discarded.length}`, attr: { style: 'color:var(--color-red)' } });
+    }
+
+    // 逐条评分（紧凑表格）
+    const table = body.createEl('table', {
+      attr: { style: 'width:100%;font-size:12px;border-collapse:collapse;margin-top:4px' },
+    });
+    const thead = table.createEl('thead');
+    const headerRow = thead.createEl('tr');
+    for (const h of ['#', '标题', '洞见', '知识', '总分', '等级', '判定']) {
+      headerRow.createEl('th', {
+        text: h,
+        attr: { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--background-modifier-border);color:var(--text-muted);font-weight:600' },
+      });
+    }
+
+    const tbody = table.createEl('tbody');
+    for (const d of details) {
+      const note = d.title ? this.result.notes.find(n => n.title === d.title) : this.result.notes[d.index];
+      const isDiscard = d.verdict === '丢弃';
+      const tr = tbody.createEl('tr', {
+        attr: { style: isDiscard ? 'opacity:0.5' : '' },
+      });
+      tr.createEl('td', { text: String(d.index + 1), attr: { style: 'padding:3px 6px' } });
+      tr.createEl('td', {
+        text: note?.title ?? '(未知)',
+        attr: { style: 'padding:3px 6px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
+      });
+      tr.createEl('td', { text: String(d.insightScore), attr: { style: 'padding:3px 6px;text-align:center' } });
+      tr.createEl('td', { text: String(d.knowledgeScore), attr: { style: 'padding:3px 6px;text-align:center' } });
+      const grade = scoreGrade(d.finalScore);
+      tr.createEl('td', {
+        text: String(d.finalScore),
+        attr: { style: `padding:3px 6px;text-align:center;font-weight:600;color:${grade.color}` },
+      });
+      tr.createEl('td', {
+        text: grade.label,
+        attr: { style: `padding:3px 6px;text-align:center;font-weight:600;color:${grade.color}` },
+      });
+      tr.createEl('td', {
+        text: d.verdict,
+        attr: { style: `padding:3px 6px;color:${isDiscard ? 'var(--color-red)' : 'var(--color-green)'}` },
+      });
+    }
   }
 
   /** 当前筛选状态 */
@@ -859,8 +984,18 @@ export class ResultModal extends Modal {
             attr: { style: 'font-size:11px;padding:3px 12px;cursor:pointer' },
           });
           applyBtn.addEventListener('click', () => {
-            note.title = titleInput.value.trim() || note.title;
-            note.content = contentInput.value.trim() || note.content;
+            const newTitle = titleInput.value.trim() || note.title;
+            const newContent = contentInput.value.trim() || note.content;
+            const changed = newTitle !== note.title || newContent !== note.content;
+            note.title = newTitle;
+            note.content = newContent;
+            // 编辑后核查数据不再可靠，标记失效
+            if (changed && note.verification && note.verification.length > 0) {
+              note.verification = [];
+              note.tracedCount = 0;
+              note.needsCompareCount = 0;
+              note.outOfScopeCount = 0;
+            }
             isEditing = false;
             editPanel.style.display = 'none';
             editBtn.setText('✎ 编辑');
@@ -909,7 +1044,12 @@ export class ResultModal extends Modal {
         this.close();
       });
     bar.createEl('button', { text: '关闭' })
-      .addEventListener('click', () => this.close());
+      .addEventListener('click', () => {
+        if (this.selectedNotes.size > 0) {
+          if (!confirm(`还有 ${this.selectedNotes.size} 条笔记未保存，确定关闭？`)) return;
+        }
+        this.close();
+      });
   }
 
   private updateSelectionCount() {

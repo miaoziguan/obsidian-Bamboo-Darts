@@ -61,15 +61,19 @@ export interface PluginSettings {
 
   // 深度提炼
   enableDeepMode: boolean;
+
+  // 高级参数
+  /** 输入文本截断长度（默认 10000 字） */
+  inputTruncateLength: number;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   settingsVersion: 2,
   deepseekApiKey: '',
   deepseekApiUrl: 'https://api.deepseek.com/v1/chat/completions',
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-chat',
   maxTokens: 6000,
-  targetFolder: 'Atomic Notes',
+  targetFolder: '原子笔记',
   dedupTargetFolder: '',
   fileNameTemplate: '{{title}}',
   autoSave: false,
@@ -98,6 +102,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
   // 深度提炼
   enableDeepMode: false,
+
+  // 高级参数
+  inputTruncateLength: 10000,
 };
 
 export class AtomicNotesSettingTab extends PluginSettingTab {
@@ -130,7 +137,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('API Key')
-      .setDesc('你的 API Key（必需）')
+      .setDesc('你的 API Key（必需）。还没有？前往 platform.deepseek.com 注册获取')
       .addText(text => {
         text
           .setPlaceholder('sk-...')
@@ -202,12 +209,12 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('目标文件夹')
-      .setDesc('原子笔记保存的文件夹（默认：Atomic Notes）')
+      .setDesc('原子笔记保存的文件夹（默认：原子笔记）')
       .addText(text =>
         text
           .setValue(this.plugin.settings.targetFolder)
           .onChange(async value => {
-            this.plugin.settings.targetFolder = value.trim() || 'Atomic Notes';
+            this.plugin.settings.targetFolder = value.trim() || '原子笔记';
             await this.plugin.saveSettings();
           })
       );
@@ -295,7 +302,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('自动创建源文件反向链接')
-      .setDesc('从选中文本提炼时，在源文件插入 [[笔记标题]] 链接')
+      .setDesc('从选中文本提炼时，在源文件插入 [[笔记标题]] 链接（仅对「选中文本提炼」生效）')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.autoBacklink)
@@ -314,7 +321,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('启用内容核查')
-      .setDesc('提炼后自动核查笔记中的事实和数据是否能在原文中找到依据')
+      .setDesc('提炼后自动核查笔记中的事实和数据是否能在原文中找到依据（每次提炼额外消耗 1 次 API 调用）')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.factCheck)
@@ -345,7 +352,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     const reviewToggleSetting = new Setting(containerEl)
       .setName('启用笔记复查')
-      .setDesc('提炼完成后，用 AI 对笔记价值评分，自动过滤低质量笔记（评分<3）')
+      .setDesc('提炼完成后，用 AI 对笔记价值评分，自动过滤低质量笔记（评分<3）（每次提炼额外消耗 1 次 API 调用）')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.enableReview || false)
@@ -562,9 +569,9 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
             new Setting(advancedContainer)
               .setName('质量评分门槛')
-              .setDesc('AI 复查评分低于此值的笔记会被丢弃。值越低保留越多')
+              .setDesc('AI 复查总分（洞见+知识，2-10）低于此值的笔记会被丢弃。技术文献 4、通用文章 6、观点评论 7')
               .addSlider(s => s
-                .setLimits(1, 5, 1)
+                .setLimits(1, 10, 1)
                 .setValue(cfg.reviewMinScore)
                 .setDynamicTooltip()
                 .onChange(async v => { this.plugin.settings[key].reviewMinScore = v; await this.plugin.saveSettings(); })
@@ -593,6 +600,21 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           .onChange(async value => {
             this.plugin.settings.enableDeepMode = value;
             await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('输入截断长度')
+      .setDesc('超过此字数的文本将被截断后再发送给 AI（默认 10000 字，增大可保留更多内容但消耗更多 token）')
+      .addText(text =>
+        text
+          .setValue(String(this.plugin.settings.inputTruncateLength ?? 10000))
+          .onChange(async value => {
+            const num = parseInt(value, 10);
+            if (!isNaN(num) && num >= 1000) {
+              this.plugin.settings.inputTruncateLength = num;
+              await this.plugin.saveSettings();
+            }
           })
       );
 

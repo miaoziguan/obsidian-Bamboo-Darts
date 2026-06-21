@@ -3,12 +3,15 @@
  *
  * 将超长文本分成多段，逐段调用 AI 提炼，合并结果。
  * 仅在 enableDeepMode 且文本超过 INPUT_TRUNCATE_LENGTH 时触发。
+ *
+ * 已知权衡：段间 CHUNK_OVERLAP 重叠区可能导致相邻分段产出语义相近的笔记，
+ * 合并后由 Phase 4 同批交叉去重统一处理，不在此处预去重（避免误杀）。
  */
 
 import { AtomicNote } from '../utils/notes-standards';
 import { extractAtomicNotes, ExtractorConfig } from '../extractor';
 import { INPUT_TRUNCATE_LENGTH } from '../constants';
-import { ProgressCallback, ProgressEvent } from './progress';
+import { ProgressCallback, ProgressEvent, ProgressTracker } from './progress';
 
 /** 分段提炼的默认重叠字数 */
 const CHUNK_OVERLAP = 500;
@@ -77,21 +80,26 @@ export async function extractChunked(
   content: string,
   config: Partial<ExtractorConfig>,
   onProgress?: ProgressCallback,
+  chunkSize?: number,
+  tracker?: ProgressTracker,
 ): Promise<AtomicNote[]> {
-  const chunks = splitContent(content, INPUT_TRUNCATE_LENGTH, CHUNK_OVERLAP);
+  const effectiveChunkSize = chunkSize && chunkSize >= 1000 ? chunkSize : INPUT_TRUNCATE_LENGTH;
+  const chunks = splitContent(content, effectiveChunkSize, CHUNK_OVERLAP);
   const allNotes: AtomicNote[] = [];
   let successCount = 0;
   let failCount = 0;
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
-    const phaseLabel = `Phase 3.${i + 1}`;
+    const label = `第${i + 1}/${chunks.length}轮`;
 
-    // 发送进度事件
-    if (onProgress) {
+    // 通过 tracker 更新进度（优先），降级到原始 onProgress
+    if (tracker) {
+      tracker.update({ detail: `${label}：处理 ${chunk.length} 字...` });
+    } else if (onProgress) {
       const event: ProgressEvent = {
-        phase: phaseLabel,
-        name: `深度提炼 第${i + 1}/${chunks.length}轮`,
+        phase: `Phase 3.${i + 1}`,
+        name: `深度提炼 ${label}`,
         detail: `处理 ${chunk.length} 字...`,
         status: 'running',
       };
@@ -105,11 +113,12 @@ export async function extractChunked(
       successCount++;
     } else {
       failCount++;
-      // 发送失败事件
-      if (onProgress) {
+      if (tracker) {
+        tracker.update({ detail: `${label}：失败 — ${result.error || '未知错误'}` });
+      } else if (onProgress) {
         const event: ProgressEvent = {
-          phase: phaseLabel,
-          name: `深度提炼 第${i + 1}/${chunks.length}轮`,
+          phase: `Phase 3.${i + 1}`,
+          name: `深度提炼 ${label}`,
           detail: `失败: ${result.error || '未知错误'}`,
           status: 'failed',
         };
@@ -121,17 +130,6 @@ export async function extractChunked(
     if (i < chunks.length - 1) {
       await new Promise(resolve => setTimeout(resolve, CHUNK_DELAY_MS));
     }
-  }
-
-  // 发送总结事件
-  if (onProgress) {
-    const event: ProgressEvent = {
-      phase: 'Phase 3',
-      name: '深度提炼总结',
-      detail: `${chunks.length}段中，${successCount}段成功，${failCount}段失败`,
-      status: failCount > 0 ? 'failed' : 'success',
-    };
-    onProgress(event, [], 0);
   }
 
   return allNotes;

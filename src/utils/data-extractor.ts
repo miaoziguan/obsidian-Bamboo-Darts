@@ -94,7 +94,11 @@ export function extractVerifiableClaims(content: string): VerifiableClaim[] {
     }
   }
 
-  return claims.slice(0, MAX_CLAIMS_PER_CHECK);
+  const limited = claims.slice(0, MAX_CLAIMS_PER_CHECK);
+  if (claims.length > MAX_CLAIMS_PER_CHECK) {
+    console.warn(`[核查] 可验证声明 ${claims.length} 条，超出上限 ${MAX_CLAIMS_PER_CHECK}，已截断，剩余 ${claims.length - MAX_CLAIMS_PER_CHECK} 条未核查`);
+  }
+  return limited;
 }
 
 // ─── 原文溯源（Layer 1 核心） ───

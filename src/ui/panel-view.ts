@@ -38,6 +38,9 @@ export class AtomicNotesPanel extends ItemView {
 
   /** 输入面板状态 */
   private _inputElements: InputElements | null = null;
+
+  /** 全局点击监听器引用（用于 onClose 清理，防止内存泄漏） */
+  private _docClickHandler: ((ev: MouseEvent) => void) | null = null;
   private _inputSubMode: 'text' | 'url' = 'text';
 
   /** 发现面板相似度矩阵缓存 */
@@ -79,6 +82,7 @@ export class AtomicNotesPanel extends ItemView {
         cls: 'atomic-notes-tab' + (i === 0 ? ' active' : ''),
         attr: {
           role: 'tab',
+          id: 'tab-' + i,
           tabindex: i === 0 ? '0' : '-1',
           'aria-selected': i === 0 ? 'true' : 'false',
           'aria-controls': `tab-panel-${i}`,
@@ -235,6 +239,10 @@ export class AtomicNotesPanel extends ItemView {
 
     readClipBtn.addEventListener('click', async (ev) => {
       ev.preventDefault();
+      if (!navigator.clipboard?.readText) {
+        new Notice('当前环境不支持直接读取剪贴板，请手动粘贴文本');
+        return;
+      }
       try {
         const rawText = await navigator.clipboard.readText();
         if (rawText && rawText.trim()) {
@@ -261,6 +269,10 @@ export class AtomicNotesPanel extends ItemView {
     // 粘贴剪贴板 URL
     pasteUrlBtn.addEventListener('click', async (ev) => {
       ev.preventDefault();
+      if (!navigator.clipboard?.readText) {
+        new Notice('当前环境不支持直接读取剪贴板，请手动粘贴文本');
+        return;
+      }
       try {
         const rawText = await navigator.clipboard.readText();
         if (rawText && rawText.trim()) {
@@ -668,19 +680,19 @@ export class AtomicNotesPanel extends ItemView {
 
       try {
         await this.plugin.runExtraction(inputData, { onProgress: panelOnProgress });
-      } finally {
-        extractBtn.setText('开始提炼');
-        extractBtn.disabled = false;
-        cancelBtn.style.display = 'none';
-
+        // 仅提炼成功才清空输入（失败时保留内容，方便用户重试）
         if (this._inputSubMode === 'text') {
           elements.textarea.value = '';
           elements.charCountEl.setText('0 字');
         } else {
           elements.urlInput.value = '';
         }
+      } finally {
+        extractBtn.setText('开始提炼');
+        extractBtn.disabled = false;
+        cancelBtn.style.display = 'none';
 
-        // 2 秒后隐藏进度区域
+        // 5 秒后隐藏进度区域
         this._hideTimer = setTimeout(() => {
           if (this._progressWrap) this._progressWrap.style.display = 'none';
           if (this._progressBody) this._progressBody.empty();
@@ -884,18 +896,27 @@ export class AtomicNotesPanel extends ItemView {
     searchInput.addEventListener('focus', () => {
       updateDropdown(searchInput.value.trim());
     });
-    // 点击外部关闭下拉
-    document.addEventListener('click', (ev) => {
+    // 点击外部关闭下拉（存储引用以便 onClose 清理）
+    if (this._docClickHandler) {
+      document.removeEventListener('click', this._docClickHandler);
+    }
+    this._docClickHandler = (ev: MouseEvent) => {
       if (!searchWrap.contains(ev.target as Node)) {
         dropdown.style.display = 'none';
       }
-    }, { once: false });
+    };
+    document.addEventListener('click', this._docClickHandler);
   }
 
   async onClose(): Promise<void> {
     if (this._hideTimer) {
       clearTimeout(this._hideTimer);
       this._hideTimer = null;
+    }
+    // 清理全局 document 点击监听器（防止内存泄漏）
+    if (this._docClickHandler) {
+      document.removeEventListener('click', this._docClickHandler);
+      this._docClickHandler = null;
     }
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();

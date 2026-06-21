@@ -15,15 +15,16 @@ import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult
 import { buildSystemPrompt, buildExtractionPrompt } from './extraction/tag-preferences';
 import { classifyContent, resolveProfileConfig, PROFILE_LABELS, ContentProfile, ProfileConfig } from './extraction/profiles';
 import { verifyClaims } from './extraction/fact-checker';
-import { reviewNotes, ReviewConfig } from './review/note-reviewer';
+import { reviewNotes, ReviewConfig, ReviewResult } from './review/note-reviewer';
 import { extractUrlContent } from './extraction/url-extractor';
 import { extractChunked } from './extraction/chunked-extractor';
-import { AI_TEMPERATURE, INPUT_TRUNCATE_LENGTH } from './constants';
+import { AI_TEMPERATURE, INPUT_TRUNCATE_LENGTH, EXTRACTION_TIMEOUT_MS } from './constants';
 import { ProgressCallback, ProgressEvent, createProgressTracker, ProgressTracker } from './extraction/progress';
+import { fnv1aHash } from './utils/hash';
 
-/** 笔记内容指纹（用于稳定映射，不依赖标题或对象引用） */
+/** 笔记内容指纹（FNV-1a 哈希，防碰撞能力远强于 length:prefix） */
 function noteFingerprint(note: AtomicNote): string {
-  return `${note.content.length}:${note.content.slice(0, 100)}`;
+  return `${note.content.length}:${fnv1aHash(note.content.slice(0, 200))}`;
 }
 
 /**
@@ -40,11 +41,12 @@ function remapPendingDuplicates(
 
   return pending
     .filter(p => {
-      const key = `${p.newNoteContent.length}:${p.newNoteContent.slice(0, 100)}`;
+      // 构造临时 AtomicNote 以复用 noteFingerprint
+      const key = `${p.newNoteContent.length}:${fnv1aHash(p.newNoteContent.slice(0, 200))}`;
       return postIndexMap.has(key);
     })
     .map(p => {
-      const key = `${p.newNoteContent.length}:${p.newNoteContent.slice(0, 100)}`;
+      const key = `${p.newNoteContent.length}:${fnv1aHash(p.newNoteContent.slice(0, 200))}`;
       return { ...p, newNoteIndex: postIndexMap.get(key)! };
     });
 }
@@ -60,17 +62,178 @@ function checkAborted(
   }
   return null;
 }
-import { runGateChecks } from './gate';
-import { parseAINoteOutput, AtomicNote, validateAtomicNote, ensureTags } from './utils/notes-standards';
-import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult, DuplicateInfo } from './deduplicator';
-import { buildSystemPrompt, buildExtractionPrompt } from './extraction/tag-preferences';
-import { classifyContent, resolveProfileConfig, PROFILE_LABELS, ContentProfile, ProfileConfig } from './extraction/profiles';
-import { verifyClaims } from './extraction/fact-checker';
-import { reviewNotes, ReviewConfig } from './review/note-reviewer';
-import { extractUrlContent } from './extraction/url-extractor';
-import { extractChunked } from './extraction/chunked-extractor';
-import { AI_TEMPERATURE, INPUT_TRUNCATE_LENGTH } from './constants';
-import { ProgressCallback, ProgressEvent, createProgressTracker, ProgressTracker } from './extraction/progress';
+
+// ─── Phase 子函数 ───
+
+/** Phase 4b: 知识库去重（可选） */
+async function runVaultDedupPhase(
+  notes: AtomicNote[],
+  config: ExtractorConfig,
+  profileConfig: ProfileConfig,
+  tracker: ProgressTracker,
+): Promise<{ notes: AtomicNote[]; vaultDedupResult?: DedupResult; vaultDedupPending: PendingDuplicate[] }> {
+  if (!(config.enableVaultDedup && config.vault)) {
+    tracker.start('Phase 4b', '知识库去重', '未启用或无 Vault');
+    tracker.skip('未启用或无 Vault，跳过');
+    return { notes, vaultDedupResult: undefined, vaultDedupPending: [] };
+  }
+
+  tracker.start('Phase 4b', '知识库去重', '正在与已有笔记比对...');
+
+  const matchInfos: VaultMatchInfo[] = await checkAgainstVaultDetailed(
+    config.vault,
+    notes,
+    config.dedupTargetFolder?.trim() || config.targetFolder || ''
+  );
+
+  const HIGH_SIM_THRESHOLD = profileConfig.vaultHighThreshold;
+  const MID_SIM_THRESHOLD = profileConfig.vaultMidThreshold;
+
+  const keptNotes: AtomicNote[] = [];
+  const vaultDedupPending: PendingDuplicate[] = [];
+  const highDupCount = matchInfos.filter(m => m.bestMatch && m.bestMatch.similarity >= HIGH_SIM_THRESHOLD).length;
+  const midDupCount = matchInfos.filter(m => m.bestMatch && m.bestMatch.similarity >= MID_SIM_THRESHOLD && m.bestMatch.similarity < HIGH_SIM_THRESHOLD).length;
+
+  for (const info of matchInfos) {
+    if (!info.bestMatch) {
+      keptNotes.push(info.note);
+    } else if (info.bestMatch.similarity >= HIGH_SIM_THRESHOLD) {
+      // 高相似度：保留笔记，但标记为待确认（红色提示），让用户决定
+      keptNotes.push(info.note);
+      vaultDedupPending.push({
+        similarity: info.bestMatch.similarity,
+        matchedNote: info.bestMatch.path,
+        matchedContent: info.bestMatch.content,
+        newNoteIndex: info.noteIndex,
+        newNoteTitle: info.note.title,
+        newNoteContent: info.note.content,
+        highSimilarity: true,
+      });
+    } else if (info.bestMatch.similarity >= MID_SIM_THRESHOLD) {
+      // 中相似度：保留笔记，但标记为待确认
+      keptNotes.push(info.note);
+      vaultDedupPending.push({
+        similarity: info.bestMatch.similarity,
+        matchedNote: info.bestMatch.path,
+        matchedContent: info.bestMatch.content,
+        newNoteIndex: info.noteIndex,
+        newNoteTitle: info.note.title,
+        newNoteContent: info.note.content,
+      });
+    } else {
+      keptNotes.push(info.note);
+    }
+  }
+
+  const vaultDedupResult: DedupResult = {
+    uniqueNotes: keptNotes,
+    removedCount: 0, // 不再自动丢弃，全部由用户确认
+    duplicates: matchInfos
+      .filter(m => m.bestMatch && m.bestMatch.similarity >= MID_SIM_THRESHOLD)
+      .map(m => ({
+        isDuplicate: true,
+        similarity: m.bestMatch!.similarity,
+        matchedNote: m.bestMatch!.path,
+        matchedContent: m.bestMatch!.content,
+      })),
+  };
+
+  tracker.complete(`知识库去重：${highDupCount} 条高相似度待确认，${midDupCount} 条中相似度待确认`);
+  return { notes: keptNotes, vaultDedupResult, vaultDedupPending };
+}
+
+/** Phase 5: 内容核查（可选）—— 三层管线：原文溯源 → 语义比对 → 超源标记 */
+async function runFactCheckPhase(
+  notes: AtomicNote[],
+  truncatedContent: string,
+  config: ExtractorConfig,
+  vaultDedupPending: PendingDuplicate[],
+  tracker: ProgressTracker,
+  fullContent?: string,
+): Promise<{ notes: AtomicNote[]; verificationSummary?: { traced: number; needsCompare: number; outOfScope: number }; vaultDedupPending: PendingDuplicate[] }> {
+  if (!config.factCheck) {
+    tracker.start('Phase 5', '内容核查', '未启用');
+    tracker.skip('未启用，跳过');
+    return { notes, verificationSummary: undefined, vaultDedupPending };
+  }
+
+  tracker.start('Phase 5', '内容核查', '正在溯源和比对...');
+  const verifyResult = await verifyClaims(truncatedContent, notes, {
+    deepseekApiKey: config.deepseekApiKey,
+    deepseekApiUrl: config.deepseekApiUrl,
+    model: config.model,
+    maxTokens: config.maxTokens,
+    signal: config.signal,
+  }, fullContent);
+
+  const verificationSummary = { traced: verifyResult.traced, needsCompare: verifyResult.needsCompare, outOfScope: verifyResult.outOfScope };
+
+  if (verifyResult.error) {
+    tracker.fail(`核查出错: ${verifyResult.error}`);
+    return { notes, verificationSummary, vaultDedupPending };
+  }
+
+  if (config.verifiedOnly) {
+    const originalCount = notes.length;
+    notes = notes.filter(note => {
+      const v = note.verification;
+      if (!v || v.length === 0) return true;
+      return !v.some(r => r.status === '超源');
+    });
+    vaultDedupPending = remapPendingDuplicates(notes, vaultDedupPending);
+    tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}（过滤超源：${originalCount} → ${notes.length}）`);
+  } else {
+    tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}`);
+  }
+
+  return { notes, verificationSummary, vaultDedupPending };
+}
+
+/** Phase 6: 笔记复查（可选，AI 双重保险） */
+async function runReviewPhase(
+  notes: AtomicNote[],
+  config: ExtractorConfig,
+  profileConfig: ProfileConfig,
+  vaultDedupPending: PendingDuplicate[],
+  tracker: ProgressTracker,
+): Promise<{ notes: AtomicNote[]; vaultDedupPending: PendingDuplicate[]; reviewDetails?: ReviewResult[] }> {
+  if (!config.enableReview) {
+    tracker.start('Phase 6', '笔记复查', '未启用');
+    tracker.skip('未启用，跳过');
+    return { notes, vaultDedupPending, reviewDetails: undefined };
+  }
+
+  tracker.start('Phase 6', '笔记复查（AI 双重保险）', '正在对笔记进行价值评分...');
+
+  const reviewConfig: ReviewConfig = {
+    deepseekApiKey: config.reviewApiKey || config.deepseekApiKey,
+    deepseekApiUrl: config.reviewApiUrl || config.deepseekApiUrl,
+    model: config.reviewModel || config.model,
+    maxTokens: config.maxTokens,
+    signal: config.signal,
+    minScore: profileConfig.reviewMinScore,
+  };
+
+  const reviewResult = await reviewNotes(notes, reviewConfig);
+
+  // 使用复查后的笔记（若复查失败，reviewNotes 内部已降级返回原始笔记）
+  const filteredCount = notes.length - reviewResult.reviewedNotes.length;
+
+  // 使用内容指纹重映射 vaultDedupPending 的索引
+  vaultDedupPending = remapPendingDuplicates(notes, vaultDedupPending);
+  notes = reviewResult.reviewedNotes;
+
+  // 以 reviewResult.success 为准，不再扫描 AI 输出的中文理由（避免"失败"二字误判）
+  if (!reviewResult.success) {
+    tracker.fail('复查失败，已降级使用原始笔记');
+  } else if (filteredCount > 0) {
+    tracker.complete(`复查完成，过滤 ${filteredCount} 条低质量笔记，保留 ${notes.length} 条`);
+  } else {
+    tracker.complete('复查完成，无低质量笔记需要过滤');
+  }
+
+  return { notes, vaultDedupPending, reviewDetails: reviewResult.reviewDetails };
+}
 
 export interface ExtractorConfig {
   deepseekApiKey: string;
@@ -102,12 +265,14 @@ export interface ExtractorConfig {
   enableDeepMode?: boolean;
   // 跳过了门控（强制提炼）
   skipGate?: boolean;
+  /** 输入文本截断长度（覆盖默认常量） */
+  inputTruncateLength?: number;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
   deepseekApiKey: '',
   deepseekApiUrl: 'https://api.deepseek.com/v1/chat/completions',
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-chat',
   maxTokens: 6000,
   tagPreferences: [],
   tagMode: 'lenient',
@@ -150,11 +315,49 @@ interface ReadResult {
 /**
  * Phase 1: 读取内容（URL/文本/文件）
  */
+
+/** URL 提取结果内存缓存，同一个 URL 1 小时内复用 */
+const URL_CACHE_TTL_MS = 60 * 60 * 1000;
+const urlCache = new Map<string, { content: string; cachedAt: number }>();
+
+function getFromUrlCache(url: string): string | null {
+  const entry = urlCache.get(url);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > URL_CACHE_TTL_MS) {
+    urlCache.delete(url);
+    return null;
+  }
+  return entry.content;
+}
+
+function setUrlCache(url: string, content: string): void {
+  urlCache.set(url, { content, cachedAt: Date.now() });
+}
+
+/** 清理过期缓存条目，可在插件启动时调用 */
+export function cleanExpiredUrlCache(): number {
+  const now = Date.now();
+  let removed = 0;
+  for (const [url, entry] of urlCache) {
+    if (now - entry.cachedAt > URL_CACHE_TTL_MS) {
+      urlCache.delete(url);
+      removed++;
+    }
+  }
+  return removed;
+}
+
 async function readContent(
   input: { type: 'url' | 'text' | 'selection'; content: string },
   signal?: AbortSignal
 ): Promise<ReadResult> {
   if (input.type === 'url') {
+    // 先查缓存
+    const cached = getFromUrlCache(input.content);
+    if (cached) {
+      return { success: true, content: cached, type: 'url' };
+    }
+
     try {
       const response = await requestUrl({
         url: input.content,
@@ -173,6 +376,9 @@ async function readContent(
       if (!extractResult.success) {
         return { success: false, error: extractResult.error };
       }
+
+      // 写入缓存
+      setUrlCache(input.content, extractResult.content);
 
       return { success: true, content: extractResult.content, type: 'url' };
     } catch (error: unknown) {
@@ -202,6 +408,7 @@ async function readContent(
 
 /**
  * Phase 3: 提炼原子笔记（调用 DeepSeek API）
+ * 对 5xx 和网络错误自动重试 1 次（500ms 退避）
  */
 export async function extractAtomicNotes(
   content: string,
@@ -214,77 +421,94 @@ export async function extractAtomicNotes(
   }
 
   const systemPrompt = buildSystemPrompt(fullConfig.tagPreferences, fullConfig.tagMode);
-  const userPrompt = buildExtractionPrompt(content);
+  const userPrompt = buildExtractionPrompt(content, fullConfig.inputTruncateLength || INPUT_TRUNCATE_LENGTH);
 
-  try {
-    const response = await requestUrl({
-      url: fullConfig.deepseekApiUrl,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${fullConfig.deepseekApiKey}`,
-      },
-      body: JSON.stringify({
-        model: fullConfig.model,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt,
-          },
-          {
-            role: 'user',
-            content: userPrompt,
-          },
-        ],
-        max_tokens: fullConfig.maxTokens,
-        temperature: AI_TEMPERATURE,
-      }),
-      signal: fullConfig.signal,
-    });
+  const RETRY_DELAY_MS = 500;
 
-    const aiContent = response.json?.choices?.[0]?.message?.content;
-    if (!aiContent) {
-      return { success: false, error: 'AI 返回内容为空，请检查 API 配置或稍后重试' };
-    }
-
-    const notes = parseAINoteOutput(aiContent, false);  // 纯AI模式：不修补标题，信任AI
-
-    // 如果 strict 解析出 0 条，尝试宽松模式（带 ensureTitles）
-    if (notes.length === 0) {
-      console.warn('[提炼] 严格模式解析失败，尝试宽松模式降级...');
-      const fallbackNotes = parseAINoteOutput(aiContent, true);
-      if (fallbackNotes.length > 0) {
-        console.warn(`[提炼] 宽松模式成功解析 ${fallbackNotes.length} 条笔记（可能包含质量较低的标题）`);
-        notes.push(...fallbackNotes);
-      } else {
-        console.warn('[提炼] 宽松模式也失败，AI 输出可能格式异常');
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    try {
+      if (attempt > 0) {
+        console.warn(`[提炼] 第 ${attempt + 1} 次尝试（重试）...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
       }
+
+      const response = await requestUrl({
+        url: fullConfig.deepseekApiUrl,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${fullConfig.deepseekApiKey}`,
+        },
+        body: JSON.stringify({
+          model: fullConfig.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: fullConfig.maxTokens,
+          temperature: AI_TEMPERATURE,
+        }),
+        signal: fullConfig.signal,
+      });
+
+      // 5xx 服务端错误 → 抛异常触发重试
+      if (response.status >= 500) {
+        throw new Error(`API 返回 ${response.status}`);
+      }
+
+      const aiContent = response.json?.choices?.[0]?.message?.content;
+      if (!aiContent) {
+        return { success: false, error: 'AI 返回内容为空，请检查 API 配置或稍后重试' };
+      }
+
+      const notes = parseAINoteOutput(aiContent, false);  // 纯AI模式：不修补标题，信任AI
+
+      // 如果 strict 解析出 0 条，尝试宽松模式（带 ensureTitles）
+      if (notes.length === 0) {
+        console.warn('[提炼] 严格模式解析失败，尝试宽松模式降级...');
+        const fallbackNotes = parseAINoteOutput(aiContent, true);
+        if (fallbackNotes.length > 0) {
+          console.warn(`[提炼] 宽松模式成功解析 ${fallbackNotes.length} 条笔记（可能包含质量较低的标题）`);
+          notes.push(...fallbackNotes);
+        } else {
+          console.warn('[提炼] 宽松模式也失败，AI 输出可能格式异常');
+        }
+      }
+
+      // Phase 3.5: 校验笔记质量
+      const validationResults = notes.map(note => ({
+        note,
+        validation: validateAtomicNote(note),
+      }));
+
+      const validNotes = validationResults
+        .filter(item => item.validation.valid)
+        .map(item => item.note);
+
+      if (validNotes.length === 0 && notes.length > 0) {
+        // 有笔记但全部校验失败，记录失败原因
+        const reasons = validationResults.map(item => item.validation.issues.join('; ')).filter(Boolean).join(' | ');
+        return { success: false, error: `AI 输出的笔记校验失败: ${reasons}` };
+      }
+
+      // 确保每条笔记都有标签
+      ensureTags(validNotes, fullConfig.tagPreferences);
+
+      return { success: true, notes: validNotes };
+    } catch (error: unknown) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      // 5xx 和网络错误可重试
+      const isRetryable = /5\d{2}|ETIMEDOUT|ECONNREFUSED|ECONNRESET|Failed to fetch|network/i.test(errorMsg);
+      if (isRetryable && attempt === 0) {
+        console.warn(`[提炼] 可重试错误: ${errorMsg}，${RETRY_DELAY_MS}ms 后重试...`);
+        continue;
+      }
+      return { success: false, error: `AI 调用失败: ${errorMsg}` };
     }
-
-    // Phase 3.5: 校验笔记质量
-    const validationResults = notes.map(note => ({
-      note,
-      validation: validateAtomicNote(note),
-    }));
-
-    const validNotes = validationResults
-      .filter(item => item.validation.valid)
-      .map(item => item.note);
-
-    if (validNotes.length === 0 && notes.length > 0) {
-      // 有笔记但全部校验失败，记录失败原因
-      const reasons = validationResults.map(item => item.validation.issues.join('; ')).filter(Boolean).join(' | ');
-      return { success: false, error: `AI 输出的笔记校验失败: ${reasons}` };
-    }
-
-    // 确保每条笔记都有标签
-    ensureTags(validNotes, fullConfig.tagPreferences);
-
-    return { success: true, notes: validNotes };
-  } catch (error: unknown) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    return { success: false, error: `AI 调用失败: ${errorMsg}` };
   }
+
+  // 理论上不会到达（循环内必定 return），但 TS 需要返回值
+  return { success: false, error: 'AI 调用失败: 未知错误' };
 }
 
 // ─── 完整提炼流程 ───
@@ -309,6 +533,8 @@ export interface ExtractionResult {
   vaultDedupPending?: PendingDuplicate[];
   // 疑似重复提示（中相似度），供 main.ts 判断是否走"确认后保存"流程
   duplicateHints?: { noteIndex: number; similarity: number; matchedNote: string; matchedContent: string; newNoteTitle: string; newNoteContent: string }[];
+  /** 复查评分详情（启用复查时） */
+  reviewDetails?: ReviewResult[];
 }
 
 /** 中相似度疑似重复，需用户确认 */
@@ -319,6 +545,8 @@ export interface PendingDuplicate {
   newNoteIndex: number;
   newNoteTitle: string;
   newNoteContent: string;
+  /** 是否为高相似度（>= vaultHighThreshold），用于 UI 红色警示 */
+  highSimilarity?: boolean;
 }
 
 export async function runExtraction(
@@ -330,6 +558,34 @@ export async function runExtraction(
 ): Promise<ExtractionResult> {
   const fullConfig: ExtractorConfig = { ...DEFAULT_CONFIG, ...config };
   const tracker: ProgressTracker = createProgressTracker(fullConfig.onProgress || null);
+  const truncateLength = fullConfig.inputTruncateLength && fullConfig.inputTruncateLength >= 1000
+    ? fullConfig.inputTruncateLength : INPUT_TRUNCATE_LENGTH;
+
+  // 整体超时保护（深度模式给更长时间）
+  const timeoutMs = fullConfig.enableDeepMode ? EXTRACTION_TIMEOUT_MS * 2 : EXTRACTION_TIMEOUT_MS;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<ExtractionResult>((resolve) => {
+    timeoutId = setTimeout(() => {
+      if (fullConfig.signal && !fullConfig.signal.aborted) {
+        console.warn(`[提炼] 超时（${timeoutMs / 1000}s），自动中止`);
+      }
+      resolve({
+        success: false,
+        steps: eventsToSteps(tracker.allEvents()),
+        error: `提炼超时（超过 ${timeoutMs / 1000}s）。建议：缩短文本或在设置中开启深度提炼模式分段处理`,
+      });
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([extractionMain(), timeoutPromise]);
+    return result;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+
+  async function extractionMain(): Promise<ExtractionResult> {
 
   // Phase 1: 读取内容
   tracker.start('Phase 1', '读取内容', '开始读取...');
@@ -345,8 +601,8 @@ export async function runExtraction(
   const content = readResult.content!;
 
   // 统一截断：Phase 3/5/5b 使用相同的输入，避免核查盲区
-  const truncatedContent = content.length > INPUT_TRUNCATE_LENGTH
-    ? content.slice(0, INPUT_TRUNCATE_LENGTH)
+  const truncatedContent = content.length > truncateLength
+    ? content.slice(0, truncateLength)
     : content;
 
   // Profile 分类：自动判断或手动指定（纯规则，零 API 调用，提前到门控之前）
@@ -373,7 +629,7 @@ export async function runExtraction(
 
   if (!fullConfig.skipGate) {
     tracker.start('Phase 2', '质量门控', '开始检查...');
-    gateResult = runGateChecks(truncatedContent, [], activeProfileConfig);
+    gateResult = runGateChecks(truncatedContent, activeProfileConfig);
 
     if (!gateResult.passed) {
       tracker.fail(gateResult.summary);
@@ -388,7 +644,7 @@ export async function runExtraction(
   } else {
     // 强制提炼：仍运行门控检查（不阻断），收集警告供 ResultModal 展示
     tracker.start('Phase 2', '质量门控', '已跳过阻断（强制提炼）');
-    gateResult = runGateChecks(truncatedContent, [], activeProfileConfig);
+    gateResult = runGateChecks(truncatedContent, activeProfileConfig);
     if (gateResult.warnings.length > 0) {
       tracker.complete(`跳过门控，但检测到 ${gateResult.warnings.length} 条质量提醒`);
     } else {
@@ -396,21 +652,31 @@ export async function runExtraction(
     }
   }
 
-  tracker.complete(`策略: ${PROFILE_LABELS[detectedProfile]} (${profileSource === 'auto' ? '自动检测' : '手动指定'})`);
+  // 取消检查点（Phase 2 → 3，在调用 AI API 前最后检查）
+  {
+    const r = checkAborted(fullConfig.signal, tracker);
+    if (r) return r;
+  }
 
   // Phase 3: 提炼原子笔记（AI 模式 / 深度模式）
   let extractResult: { success: boolean; notes?: AtomicNote[]; error?: string };
 
-  if (fullConfig.enableDeepMode && content.length > INPUT_TRUNCATE_LENGTH) {
-    tracker.start('Phase 3', '提炼原子笔记（深度模式）', `文本 ${content.length} 字，分段提炼中...`);
-    const chunkedNotes = await extractChunked(content, config, fullConfig.onProgress);
+  const profileLabel = `${profileSource === 'auto' ? '自动检测' : '手动指定'}`;
+  const deepHint = (content.length > truncateLength && !fullConfig.enableDeepMode) ? '（可在设置中开启深度提炼模式处理超长文本）' : '';
+  const truncateNote = content.length > truncateLength
+    ? ` 原文 ${content.length} 字，截断至 ${truncateLength} 字后发送${deepHint}`
+    : '';
+
+  if (fullConfig.enableDeepMode && content.length > truncateLength) {
+    tracker.start('Phase 3', '提炼原子笔记（深度模式）', `${profileLabel} | 文本 ${content.length} 字，分段提炼中...`);
+    const chunkedNotes = await extractChunked(content, config, fullConfig.onProgress, truncateLength, tracker);
     if (chunkedNotes.length === 0) {
       extractResult = { success: false, error: '深度提炼未产出任何笔记' };
     } else {
       extractResult = { success: true, notes: chunkedNotes };
     }
   } else {
-    tracker.start('Phase 3', '提炼原子笔记', '正在调用 DeepSeek API...');
+    tracker.start('Phase 3', '提炼原子笔记', `${profileLabel} | 正在调用 DeepSeek API...${truncateNote}`);
     extractResult = await extractAtomicNotes(truncatedContent, config);
   }
 
@@ -439,67 +705,10 @@ export async function runExtraction(
   }
 
   // Phase 4b: 知识库去重（可选）
-  let vaultDedupResult: DedupResult | undefined;
-  let vaultDedupPending: PendingDuplicate[] = [];
-
-  if (fullConfig.enableVaultDedup && fullConfig.vault) {
-    tracker.start('Phase 4b', '知识库去重', '正在与已有笔记比对...');
-
-    const matchInfos: VaultMatchInfo[] = await checkAgainstVaultDetailed(
-      fullConfig.vault,
-      notes,
-      fullConfig.dedupTargetFolder?.trim() || fullConfig.targetFolder || ''
-    );
-
-    // 使用 Profile 策略的阈值
-    const HIGH_SIM_THRESHOLD = activeProfileConfig.vaultHighThreshold;
-    const MID_SIM_THRESHOLD = activeProfileConfig.vaultMidThreshold;
-
-    const keptNotes: AtomicNote[] = [];
-    const highDupCount = matchInfos.filter(m => m.bestMatch && m.bestMatch.similarity >= HIGH_SIM_THRESHOLD).length;
-    const midDupCount = matchInfos.filter(m => m.bestMatch && m.bestMatch.similarity >= MID_SIM_THRESHOLD && m.bestMatch.similarity < HIGH_SIM_THRESHOLD).length;
-
-    for (const info of matchInfos) {
-      if (!info.bestMatch) {
-        keptNotes.push(info.note);
-      } else if (info.bestMatch.similarity >= HIGH_SIM_THRESHOLD) {
-        // 高相似度：自动去重，跳过
-      } else if (info.bestMatch.similarity >= MID_SIM_THRESHOLD) {
-        // 中相似度：保留笔记，但标记为待确认
-        keptNotes.push(info.note);
-        vaultDedupPending.push({
-          similarity: info.bestMatch.similarity,
-          matchedNote: info.bestMatch.path,
-          matchedContent: info.bestMatch.content,
-          newNoteIndex: info.noteIndex,
-          newNoteTitle: info.note.title,
-          newNoteContent: info.note.content,
-        });
-      } else {
-        keptNotes.push(info.note);
-      }
-    }
-
-    notes = keptNotes;
-
-    vaultDedupResult = {
-      uniqueNotes: keptNotes,
-      removedCount: highDupCount,
-      duplicates: matchInfos
-        .filter(m => m.bestMatch && m.bestMatch.similarity >= MID_SIM_THRESHOLD)
-        .map(m => ({
-          isDuplicate: true,
-          similarity: m.bestMatch!.similarity,
-          matchedNote: m.bestMatch!.path,
-          matchedContent: m.bestMatch!.content,
-        })),
-    };
-
-    tracker.complete(`知识库去重：去除 ${highDupCount} 条高相似度重复，${midDupCount} 条待确认`);
-  } else {
-    tracker.start('Phase 4b', '知识库去重', '未启用或无 Vault');
-    tracker.skip('未启用或无 Vault，跳过');
-  }
+  const vaultResult = await runVaultDedupPhase(notes, fullConfig, activeProfileConfig, tracker);
+  notes = vaultResult.notes;
+  let vaultDedupResult = vaultResult.vaultDedupResult;
+  let vaultDedupPending = vaultResult.vaultDedupPending;
 
   // 取消检查点（Phase 4b → 5）
   {
@@ -507,44 +716,11 @@ export async function runExtraction(
     if (r) return r;
   }
 
-  // Phase 5: 内容核查（可选）—— 三层管线：原文溯源 → 语义比对 → 超源标记
-  let verificationSummary: { traced: number; needsCompare: number; outOfScope: number } | undefined;
-
-  if (fullConfig.factCheck) {
-    tracker.start('Phase 5', '内容核查', '正在溯源和比对...');
-    const verifyResult = await verifyClaims(truncatedContent, notes, {
-      deepseekApiKey: fullConfig.deepseekApiKey,
-      deepseekApiUrl: fullConfig.deepseekApiUrl,
-      model: fullConfig.model,
-      maxTokens: fullConfig.maxTokens,
-      signal: fullConfig.signal,
-    });
-
-    verificationSummary = { traced: verifyResult.traced, needsCompare: verifyResult.needsCompare, outOfScope: verifyResult.outOfScope };
-
-    if (verifyResult.error) {
-      tracker.fail(`核查出错: ${verifyResult.error}`);
-    } else {
-        if (fullConfig.verifiedOnly) {
-          const originalCount = notes.length;
-          notes = notes.filter(note => {
-            const v = note.verification;
-            if (!v || v.length === 0) return true;
-            return !v.some(r => r.status === '超源');
-          });
-
-          // 使用内容指纹重映射 vaultDedupPending 的索引
-          vaultDedupPending = remapPendingDuplicates(notes, vaultDedupPending);
-
-          tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}（过滤超源：${originalCount} → ${notes.length}）`);
-      } else {
-        tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}`);
-      }
-    }
-  } else {
-    tracker.start('Phase 5', '内容核查', '未启用');
-    tracker.skip('未启用，跳过');
-  }
+  // Phase 5: 内容核查（可选）
+  const factCheckResult = await runFactCheckPhase(notes, truncatedContent, fullConfig, vaultDedupPending, tracker, content);
+  notes = factCheckResult.notes;
+  const verificationSummary = factCheckResult.verificationSummary;
+  vaultDedupPending = factCheckResult.vaultDedupPending;
 
   // 取消检查点（Phase 5 → 6）
   {
@@ -553,40 +729,10 @@ export async function runExtraction(
   }
 
   // Phase 6: 笔记复查（可选）
-  if (fullConfig.enableReview) {
-    tracker.start('Phase 6', '笔记复查（AI 双重保险）', '正在对笔记进行价值评分...');
-
-    const reviewConfig: ReviewConfig = {
-      deepseekApiKey: fullConfig.reviewApiKey || fullConfig.deepseekApiKey,
-      deepseekApiUrl: fullConfig.reviewApiUrl || fullConfig.deepseekApiUrl,
-      model: fullConfig.reviewModel || fullConfig.model,
-      maxTokens: fullConfig.maxTokens,
-      signal: fullConfig.signal,
-      minScore: activeProfileConfig.reviewMinScore,
-    };
-
-    const reviewResult = await reviewNotes(notes, reviewConfig);
-
-    // 使用复查后的笔记（若复查失败，reviewNotes 内部已降级返回原始笔记）
-    const filteredCount = notes.length - reviewResult.reviewedNotes.length;
-
-    // 使用内容指纹重映射 vaultDedupPending 的索引
-    vaultDedupPending = remapPendingDuplicates(notes, vaultDedupPending);
-
-    notes = reviewResult.reviewedNotes;
-
-    // 以 reviewResult.success 为准，不再扫描 AI 输出的中文理由（避免"失败"二字误判）
-    if (!reviewResult.success) {
-      tracker.fail('复查失败，已降级使用原始笔记');
-    } else if (filteredCount > 0) {
-      tracker.complete(`复查完成，过滤 ${filteredCount} 条低质量笔记，保留 ${notes.length} 条`);
-    } else {
-      tracker.complete('复查完成，无低质量笔记需要过滤');
-    }
-  } else {
-    tracker.start('Phase 6', '笔记复查', '未启用');
-    tracker.skip('未启用，跳过');
-  }
+  const reviewResult = await runReviewPhase(notes, fullConfig, activeProfileConfig, vaultDedupPending, tracker);
+  notes = reviewResult.notes;
+  vaultDedupPending = reviewResult.vaultDedupPending;
+  const reviewDetails = reviewResult.reviewDetails;
 
   // 收尾
   tracker.finish();
@@ -624,5 +770,8 @@ export async function runExtraction(
     vaultDedupResult,
     vaultDedupPending: vaultDedupPending.length > 0 ? vaultDedupPending : undefined,
     duplicateHints,
+    reviewDetails,
   };
 }
+
+  }

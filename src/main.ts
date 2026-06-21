@@ -4,7 +4,7 @@
  * 功能：从文章/链接/选中文本中提炼原子笔记，自动去重后存入知识库
  */
 
-import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, Modal } from 'obsidian';
+import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, Modal, App } from 'obsidian';
 import { AtomicNotesSettingTab, PluginSettings, DEFAULT_SETTINGS } from './ui/setting-tab';
 import { runExtraction } from './extractor';
 import { stripImageNoise } from './utils/clipboard';
@@ -29,10 +29,27 @@ function friendlyError(error: unknown): string {
   return raw;
 }
 
+// ─── 共享样式常量 ───
+
+const MSG_BOX_STYLE = [
+  'background:var(--background-secondary)',
+  'border-left:3px solid var(--color-orange)',
+  'border-radius:6px',
+  'padding:8px 12px',
+  'margin:10px 0',
+  'font-size:13px',
+  'color:var(--text-muted)',
+].join(';');
+
+const BTN_ROW_STYLE = 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px';
+
+const ACTION_BTN_STYLE = 'background:var(--interactive-accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600';
+
 export default class AtomicNotesPlugin extends Plugin {
   settings: PluginSettings;
   _isExtracting: boolean = false;
   private _abortController: AbortController | null = null;
+  private _progressModal: Modal | null = null;
 
   async onload() {
     console.log('Bamboo Darts 插件加载中...');
@@ -226,16 +243,25 @@ export default class AtomicNotesPlugin extends Plugin {
   }
 
   async extractFromClipboard() {
+    if (!navigator.clipboard?.readText) {
+      new Notice('当前环境不支持直接读取剪贴板，请手动粘贴文本');
+      return;
+    }
     try {
       const rawText = await navigator.clipboard.readText();
       if (!rawText || rawText.trim().length === 0) { new Notice('剪贴板为空'); return; }
       const text = stripImageNoise(rawText);
       await this.runExtraction({ type: 'text', content: text });
-    } catch (error) { new Notice('无法读取剪贴板，请检查权限'); }
+    } catch (error) { new Notice('无法读取剪贴板，请检查权限或使用面板的文本输入'); }
   }
 
   async runExtraction(input: { type: 'url' | 'text' | 'selection'; content: string }, opts: { onProgress?: ProgressCallback; skipGate?: boolean; skipDuplicateCheck?: boolean } = {}) {
-    if (this._isExtracting) { new Notice('已有提取任务在进行中，请等待完成后再试'); return; }
+    if (this._isExtracting) {
+      // 进度 Modal 已在屏幕上，静默返回
+      if (this._progressModal) return;
+      new Notice('已有提取任务正在进行中，请等待完成后再试');
+      return;
+    }
 
     // 重复提炼检测（在正式开始前检查，给用户选择权）
     if (!opts.skipDuplicateCheck) {
@@ -255,6 +281,21 @@ export default class AtomicNotesPlugin extends Plugin {
     }
     this._abortController = new AbortController();
     let progressModal: Modal | null = null;
+    let progressModalClosed = false; // 防止关闭后 onProgress 继续写入
+
+    /** 安全关闭进度 Modal */
+    const closeProgressModal = () => {
+      if (progressModalClosed || !progressModal) return;
+      progressModalClosed = true;
+      try {
+        progressModal.contentEl.empty();
+        progressModal.close();
+        if (progressModal.containerEl?.parentNode) {
+          progressModal.containerEl.parentNode.removeChild(progressModal.containerEl);
+        }
+      } catch { /* 忽略 */ }
+      progressModal = null;
+    };
     let progressCb: ProgressCallback | undefined = opts.onProgress;
     if (!progressCb) {
       const m = new (class extends Modal {
@@ -275,11 +316,12 @@ export default class AtomicNotesPlugin extends Plugin {
             this._plugin.cancelExtraction();
             if (this._cancelBtn) {
               this._cancelBtn.disabled = true;
-              this._cancelBtn.setText('取消中...');
+              this._cancelBtn.setText('取消中（当前步骤完成后生效）...');
             }
           });
         }
         update(event: ProgressEvent, allEvents: ProgressEvent[], totalMs: number) {
+          if (progressModalClosed) return;
           this._title.setText(`${event.phase}：${event.name} — 已用时 ${(totalMs / 1000).toFixed(1)}s`);
           this._body.empty();
           for (const ev of allEvents) {
@@ -297,6 +339,7 @@ export default class AtomicNotesPlugin extends Plugin {
       })(this);
       m.open();
       progressModal = m;
+      this._progressModal = m;
       progressCb = (event, allEvents, totalMs) => m.update(event, allEvents, totalMs);
     }
     try {
@@ -329,6 +372,8 @@ export default class AtomicNotesPlugin extends Plugin {
         },
         // 深度提炼
         enableDeepMode: this.settings.enableDeepMode,
+        // 输入截断长度
+        inputTruncateLength: this.settings.inputTruncateLength,
         // 强制提炼（跳过门控）
         skipGate: opts.skipGate,
       });
@@ -339,16 +384,7 @@ export default class AtomicNotesPlugin extends Plugin {
           // 门控失败 → 弹确认框，提供强制提炼选项
           this._isExtracting = false;
           this._abortController = null;
-          if (progressModal) {
-            try {
-              progressModal.contentEl.empty();
-              progressModal.close();
-              if (progressModal.containerEl?.parentNode) {
-                progressModal.containerEl.parentNode.removeChild(progressModal.containerEl);
-              }
-            } catch { /* 忽略 */ }
-            progressModal = null;
-          }
+          closeProgressModal();
           this.showForceExtractConfirm(input, result.error || '内容质量不达标');
           return;
         } else {
@@ -358,16 +394,8 @@ export default class AtomicNotesPlugin extends Plugin {
         return;
       }
       new Notice(`提炼完成，共 ${result.notes.length} 条原子笔记`);
-      if (this.settings.autoSave) {
-        // autoSave 统一行为：无论是否有疑似重复，都自动保存
-        await this.saveAndBacklink(input, result.notes);
-        if (result.duplicateHints && result.duplicateHints.length > 0) {
-          const dupCount = new Set(result.duplicateHints.map(h => h.noteIndex)).size;
-          new Notice(`已自动保存（含 ${dupCount} 篇疑似重复，你可以在知识库中核查）`, 5000);
-        }
-      } else {
-        new ResultModal(this.app, result, result.vaultDedupResult, async (notes) => { await this.saveAndBacklink(input, notes); }).open();
-      }
+      // 始终弹出结果弹窗，让用户审查质量和选择保存
+      new ResultModal(this.app, result, result.vaultDedupResult, async (notes) => { await this.saveAndBacklink(input, notes); }).open();
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') { new Notice('提炼已取消'); return; }
       // API 错误 → 弹错误弹窗，提供重试
@@ -375,18 +403,8 @@ export default class AtomicNotesPlugin extends Plugin {
     } finally {
       this._isExtracting = false;
       this._abortController = null;
-      if (progressModal) {
-        try {
-          // 先清空内容，防止 update 回调在 close 后继续执行
-          progressModal.contentEl.empty();
-          progressModal.close();
-          // 强制移除 DOM 元素，确保不会残留
-          if (progressModal.containerEl && progressModal.containerEl.parentNode) {
-            progressModal.containerEl.parentNode.removeChild(progressModal.containerEl);
-          }
-        } catch { /* 忽略关闭错误 */ }
-        progressModal = null;
-      }
+      this._progressModal = null;
+      closeProgressModal();
     }
   }
 
@@ -401,66 +419,35 @@ export default class AtomicNotesPlugin extends Plugin {
     input: { type: 'url' | 'text' | 'selection'; content: string },
     gateError: string
   ) {
+    const plugin = this;
     const modal = new (class extends Modal {
-      plugin: AtomicNotesPlugin;
-      input: { type: 'url' | 'text' | 'selection'; content: string };
-      gateError: string;
-
-      constructor(plugin: AtomicNotesPlugin, input: { type: 'url' | 'text' | 'selection'; content: string }, gateError: string) {
-        super(plugin.app);
-        this.plugin = plugin;
-        this.input = input;
-        this.gateError = gateError;
-      }
-
+      constructor(app: App) { super(app); }
       onOpen() {
         const { contentEl } = this;
         contentEl.empty();
-
         contentEl.createEl('h3', { text: '⚠️ 内容质量门控未通过' });
-
-        // 原因说明
-        const reasonBox = contentEl.createEl('div', {
-          attr: {
-            style: [
-              'background:var(--background-secondary)',
-              'border-left:3px solid var(--color-orange)',
-              'border-radius:6px',
-              'padding:8px 12px',
-              'margin:10px 0',
-              'font-size:13px',
-              'color:var(--text-muted)',
-            ].join(';'),
-          },
-        });
-        reasonBox.setText(this.gateError);
-
+        contentEl.createEl('div', { attr: { style: MSG_BOX_STYLE }, text: gateError });
         contentEl.createEl('p', {
           text: '强制提炼将跳过质量检查，直接发送给 AI。低质内容可能导致提炼结果较差。',
           attr: { style: 'font-size:13px;color:var(--text-muted);margin:8px 0' },
         });
-
-        // 按钮栏
-        const btnRow = contentEl.createEl('div', {
-          attr: { style: 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px' },
+        contentEl.createEl('p', {
+          text: '提示：可以选取更长的段落，或在设置中手动指定内容策略',
+          attr: { style: 'font-size:12px;color:var(--text-faint);margin:4px 0 8px' },
         });
-
-        const cancelBtn = btnRow.createEl('button', { text: '放弃' });
-        cancelBtn.addEventListener('click', () => this.close());
-
+        const btnRow = contentEl.createEl('div', { attr: { style: BTN_ROW_STYLE } });
+        btnRow.createEl('button', { text: '放弃' }).addEventListener('click', () => this.close());
         const forceBtn = btnRow.createEl('button', {
           text: '强制提炼',
           attr: { style: 'background:var(--color-orange);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600' },
         });
         forceBtn.addEventListener('click', async () => {
           this.close();
-          await this.plugin.runExtraction(this.input, { skipGate: true });
+          await plugin.runExtraction(input, { skipGate: true });
         });
       }
-
       onClose() { this.contentEl.empty(); }
-    })(this, input, gateError);
-
+    })(this.app);
     modal.open();
   }
 
@@ -474,60 +461,36 @@ export default class AtomicNotesPlugin extends Plugin {
   ) {
     const daysAgo = Math.floor((Date.now() - new Date(previous.extractedAt).getTime()) / (1000 * 60 * 60 * 24));
     const timeStr = daysAgo === 0 ? '今天' : `${daysAgo}天前`;
+    const plugin = this;
 
     const modal = new (class extends Modal {
-      plugin: AtomicNotesPlugin;
-      constructor(plugin: AtomicNotesPlugin) { super(plugin.app); this.plugin = plugin; }
-
+      constructor(app: App) { super(app); }
       onOpen() {
         const { contentEl } = this;
         contentEl.empty();
         contentEl.createEl('h3', { text: '⚠️ 此内容已提炼过' });
-
-        const infoBox = contentEl.createEl('div', {
-          attr: {
-            style: [
-              'background:var(--background-secondary)',
-              'border-left:3px solid var(--color-orange)',
-              'border-radius:6px',
-              'padding:8px 12px',
-              'margin:10px 0',
-              'font-size:13px',
-              'color:var(--text-muted)',
-            ].join(';'),
-          },
+        contentEl.createEl('div', {
+          attr: { style: MSG_BOX_STYLE },
+          text: `此内容已在${timeStr}提炼过，共 ${previous.noteCount} 条笔记。`,
         });
-        infoBox.setText(`此内容已在${timeStr}提炼过，共 ${previous.noteCount} 条笔记。`);
-
-        const btnRow = contentEl.createEl('div', {
-          attr: { style: 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px' },
-        });
-
-        const cancelBtn = btnRow.createEl('button', { text: '取消' });
-        cancelBtn.addEventListener('click', () => this.close());
+        const btnRow = contentEl.createEl('div', { attr: { style: BTN_ROW_STYLE } });
+        btnRow.createEl('button', { text: '取消' }).addEventListener('click', () => this.close());
 
         if (previous.savedPaths && previous.savedPaths.length > 0) {
-          const viewBtn = btnRow.createEl('button', { text: '查看上次结果' });
-          viewBtn.addEventListener('click', () => {
+          btnRow.createEl('button', { text: '查看上次结果' }).addEventListener('click', () => {
             this.close();
-            const firstPath = previous.savedPaths![0];
-            this.plugin.app.workspace.openLinkText(firstPath, '', false);
+            plugin.app.workspace.openLinkText(previous.savedPaths![0], '', false);
           });
         }
 
-        const reExtractBtn = btnRow.createEl('button', {
-          text: '重新提炼',
-          attr: { style: 'background:var(--interactive-accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600' },
-        });
+        const reExtractBtn = btnRow.createEl('button', { text: '重新提炼', attr: { style: ACTION_BTN_STYLE } });
         reExtractBtn.addEventListener('click', async () => {
           this.close();
-          await this.plugin.runExtraction(input, { ...opts, skipDuplicateCheck: true });
+          await plugin.runExtraction(input, { ...opts, skipDuplicateCheck: true });
         });
       }
-
       onClose() { this.contentEl.empty(); }
-    })(this);
-
+    })(this.app);
     modal.open();
   }
 
@@ -540,53 +503,27 @@ export default class AtomicNotesPlugin extends Plugin {
     opts: { onProgress?: ProgressCallback; skipGate?: boolean; skipDuplicateCheck?: boolean },
     retryable: boolean
   ) {
+    const plugin = this;
+    const ERROR_BOX_STYLE = MSG_BOX_STYLE.replace('var(--color-orange)', 'var(--color-red)') + ';word-break:break-word';
     const modal = new (class extends Modal {
-      constructor(plugin: AtomicNotesPlugin) { super(plugin.app); }
-
+      constructor(app: App) { super(app); }
       onOpen() {
         const { contentEl } = this;
         contentEl.empty();
         contentEl.createEl('h3', { text: '✗ 提炼失败' });
-
-        const errorBox = contentEl.createEl('div', {
-          attr: {
-            style: [
-              'background:var(--background-secondary)',
-              'border-left:3px solid var(--color-red)',
-              'border-radius:6px',
-              'padding:10px 14px',
-              'margin:10px 0',
-              'font-size:13px',
-              'color:var(--text-muted)',
-              'word-break:break-word',
-            ].join(';'),
-          },
-        });
-        errorBox.setText(errorMsg);
-
-        const btnRow = contentEl.createEl('div', {
-          attr: { style: 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px' },
-        });
-
-        const closeBtn = btnRow.createEl('button', { text: '关闭' });
-        closeBtn.addEventListener('click', () => this.close());
-
+        contentEl.createEl('div', { attr: { style: ERROR_BOX_STYLE }, text: errorMsg });
+        const btnRow = contentEl.createEl('div', { attr: { style: BTN_ROW_STYLE } });
+        btnRow.createEl('button', { text: '关闭' }).addEventListener('click', () => this.close());
         if (retryable) {
-          const retryBtn = btnRow.createEl('button', {
-            text: '重试',
-            attr: { style: 'background:var(--interactive-accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600' },
-          });
+          const retryBtn = btnRow.createEl('button', { text: '重试', attr: { style: ACTION_BTN_STYLE } });
           retryBtn.addEventListener('click', async () => {
             this.close();
-            // 重试时跳过重复检测
-            await this.plugin.runExtraction(input, { skipDuplicateCheck: true, skipGate: opts.skipGate });
+            await plugin.runExtraction(input, { skipDuplicateCheck: true, skipGate: opts.skipGate });
           });
         }
       }
-
       onClose() { this.contentEl.empty(); }
-    })(this);
-
+    })(this.app);
     modal.open();
   }
 
@@ -596,7 +533,7 @@ export default class AtomicNotesPlugin extends Plugin {
     try {
       new Notice('正在保存到知识库...');
       const saveResult = await saveNotes(this.app, notes, {
-        targetFolder: this.settings.targetFolder || 'Atomic Notes',
+        targetFolder: this.settings.targetFolder || '原子笔记',
         fileNameTemplate: this.settings.fileNameTemplate || '{{title}}',
       });
       savedPaths = saveResult.paths;

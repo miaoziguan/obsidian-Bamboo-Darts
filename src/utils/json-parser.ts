@@ -22,16 +22,53 @@ export function parseJsonArrayFromAI<T>(aiContent: string): T[] | null {
     jsonStr = codeBlockMatch[1].trim();
   }
 
-  // 提取 JSON 数组
-  const jsonMatch = jsonStr.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
+  // 提取最外层平衡方括号（手写栈匹配，避免贪心正则跨段误匹配）
+  const bracketMatch = extractBalancedBrackets(jsonStr);
+  if (!bracketMatch) {
     return null;
   }
 
   try {
-    return JSON.parse(jsonMatch[0]) as T[];
+    return JSON.parse(bracketMatch) as T[];
   } catch (e) {
     console.error('[JSON 解析] 解析失败：', e, '\n原始内容：', aiContent.slice(0, 500));
     return null;
   }
+}
+
+/**
+ * 从字符串中提取最外层平衡方括号内容
+ * 处理多段 [...] 时只取第一个完整匹配，避免贪心正则跨段误匹配
+ */
+function extractBalancedBrackets(str: string): string | null {
+  const start = str.indexOf('[');
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = start; i < str.length; i++) {
+    const ch = str[i];
+
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+
+    if (inString) {
+      if (ch === '\\') escapeNext = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') inString = true;
+    else if (ch === '[') depth++;
+    else if (ch === ']') {
+      depth--;
+      if (depth === 0) return str.slice(start, i + 1);
+    }
+  }
+
+  return null;
 }

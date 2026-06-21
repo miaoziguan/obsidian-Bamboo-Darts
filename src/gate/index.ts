@@ -48,7 +48,6 @@ function buildSummary(reasons: string[]): string {
 
 export function runGateChecks(
   content: string,
-  processedContents: string[] = [],
   profileConfig?: ProfileConfig
 ): GateCheckResult {
   const reasons: string[] = [];

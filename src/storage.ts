@@ -13,7 +13,7 @@ export interface StorageConfig {
 }
 
 const DEFAULT_CONFIG: StorageConfig = {
-  targetFolder: 'Atomic Notes',
+  targetFolder: '原子笔记',
   fileNameTemplate: '{{title}}',
 };
 
@@ -33,9 +33,11 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 export function generateFileName(template: string, note: AtomicNote): string {
   const safeTemplate = template || '{{title}}';
   // Bug #11 修复：使用同一个 Date 对象，避免午夜时间不一致
+  // 使用本地时间（避免 UTC 导致文件名与用户时区不一致）
   const now = new Date();
-  const date = now.toISOString().slice(0, 10); // YYYY-MM-DD
-  const time = now.toISOString().slice(11, 19).replace(/:/g, '-'); // HH-MM-SS
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
   
   let fileName = safeTemplate
     .replace(/{{title}}/g, sanitizeFileName(note.title))
@@ -63,6 +65,10 @@ export function sanitizeFileName(name: string): string {
 
 /** Bug #9 修复：转义 YAML frontmatter 中的特殊字符（@internal 暴露给测试） */
 export function escapeYamlValue(value: string): string {
+  // 如果值包含换行符，使用双引号并转义换行符
+  if (/[\n\r]/.test(value)) {
+    return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r')}"`;
+  }
   // 如果值包含 YAML 特殊字符，用双引号包裹并转义内部引号
   if (/[:\[\]{}#&*!|>'"%@`,?\\]/.test(value)) {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -80,7 +86,12 @@ export function formatNoteAsMarkdown(note: AtomicNote): string {
   lines.push(`created: ${note.createdAt}`);
 
   if (note.tags && note.tags.length > 0) {
-    lines.push(`tags: [${note.tags.map(t => `"${t.replace(/"/g, '\\"')}"`).join(', ')}]`);
+    // 使用 YAML 列表格式，避免标签内含 ] 或 , 破坏内联数组语法
+    lines.push('tags:');
+    for (const tag of note.tags) {
+      const safeTag = tag.replace(/"/g, '\\"');
+      lines.push(`  - "${safeTag}"`);
+    }
   }
 
   lines.push('---');
@@ -189,7 +200,7 @@ export async function saveNotes(
     const existingFiles = app.vault.getMarkdownFiles();
     const existingPaths = new Set(
       existingFiles
-        .filter(f => f.path.startsWith(fullConfig.targetFolder))
+        .filter(f => f.path.startsWith(fullConfig.targetFolder + '/'))
         .map(f => f.path)
     );
 

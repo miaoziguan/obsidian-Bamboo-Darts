@@ -20,7 +20,7 @@ import { AtomicNote } from './utils/notes-standards';
 import {
   DEDUP_BATCH_SIZE, DEDUP_CACHE_TTL,
   MIN_TOKENS_THRESHOLD, CROSS_BATCH_THRESHOLD, IDF_SMOOTH,
-  LENGTH_RATIO_THRESHOLD, TITLE_WEIGHT, CONTENT_WEIGHT, SHORT_NOTE_LENGTH,
+  LENGTH_RATIO_THRESHOLD, TITLE_WEIGHT, CONTENT_WEIGHT, SHORT_NOTE_LENGTH, SHORT_NOTE_BOOST_FACTOR,
 } from './constants';
 
 // ─── Token 化 ───
@@ -311,9 +311,17 @@ async function loadAndPreprocessExistingNotes(
     for (let j = 0; j < batch.length; j++) {
       const file = batch[j] as TFile;
       const content = contents[j];
-      // 提取标题
-      const titleMatch = content.match(/^#\s+(.+)$/m) || content.match(/^(.+)$/);
-      const title = titleMatch ? titleMatch[1].trim() : '';
+      // 从 YAML frontmatter 提取标题（插件保存的笔记格式首行是 ---）
+      let title = '';
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
+      if (fmMatch) {
+        const titleLine = fmMatch[1].match(/^title:\s*(.+)$/m);
+        if (titleLine) title = titleLine[1].trim();
+      }
+      if (!title) {
+        const headingMatch = content.match(/^#\s+(.+)$/m);
+        title = headingMatch ? headingMatch[1].trim() : (content.split('\n')[0]?.trim() || '');
+      }
       rawNotes.push({ path: file.path, content, title, mtime: file.stat.mtime });
       allTokens.push(tokenize(content));
     }
@@ -425,7 +433,7 @@ export async function checkAgainstVaultDetailed(
 
     // 短笔记放大（短笔记 token 稀疏，相似度天然偏低）
     if (bestMatch && length < SHORT_NOTE_LENGTH) {
-      bestMatch.similarity = Math.min(bestMatch.similarity * 1.15, 1.0);
+      bestMatch.similarity = Math.min(bestMatch.similarity * SHORT_NOTE_BOOST_FACTOR, 1.0);
     }
 
     results.push({ note, noteIndex: idx, bestMatch });

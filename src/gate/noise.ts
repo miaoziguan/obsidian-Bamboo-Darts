@@ -68,7 +68,7 @@ export function isNoise(ch: string): boolean {
   // 数学运算符 / 杂项符号
   if (code >= 0x2200 && code <= 0x22FF) return false;
   if (code >= 0x2500 && code <= 0x257F) return false;
-  // 字母符号（@#$% 等已在 0x0020-0x00FF 覆盖）
+  if (code >= 0xFE00 && code <= 0xFE0F) return false; // 变体选择器（Emoji 修饰符）
 
   return true;
 }

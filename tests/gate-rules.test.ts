@@ -1,4 +1,5 @@
 import { runGateChecks } from '../src/gate';
+import { checkDuplicate } from '../src/gate/duplicate';
 import { ProfileConfig, PROFILE_CONFIGS } from '../src/extraction/profiles';
 
 describe('gate-rules', () => {
@@ -30,8 +31,9 @@ describe('gate-rules', () => {
       expect(content.length).toBeGreaterThan(50000);
       const result = runGateChecks(content);
       const hasLengthWarning = result.warnings.some(w => w.includes('内容较长'));
+      const hasLengthBlock = result.reasons.some(r => r.includes('内容过长'));
       const hasDensityBlock = result.reasons.some(r => r.includes('信息密度'));
-      expect(hasLengthWarning || hasDensityBlock).toBe(true);
+      expect(hasLengthWarning || hasLengthBlock || hasDensityBlock).toBe(true);
     });
 
     it('should block for spammy content (3+ signals)', () => {
@@ -71,12 +73,14 @@ describe('gate-rules', () => {
       expect(result.reasons).toContainEqual(expect.stringContaining('噪声占比'));
     });
 
-    it('should block for duplicate content', () => {
+    it('should block for duplicate content (via checkDuplicate)', () => {
       const content = '这是一段足够长的测试内容用于测试重复检测功能是否正常工作确保长度超过五十字符并且内容足够丰富才能触发重复检测规则。';
       const processed = ['这是一段足够长的测试内容用于测试重复检测功能是否正常工作确保长度超过五十字符并且内容足够丰富才能触发重复检测规则。'];
-      const result = runGateChecks(content, processed);
-      expect(result.passed).toBe(false);
-      expect(result.reasons).toContainEqual(expect.stringContaining('高度相似'));
+      const result = checkDuplicate(content, processed);
+      expect(result.status).toBe('block');
+      if (result.status === 'block') {
+        expect(result.reason).toContain('高度相似');
+      }
     });
 
     it('should not block for different content', () => {

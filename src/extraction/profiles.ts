@@ -35,7 +35,7 @@ export interface ProfileConfig {
   /** Phase 2: 内容最长长度——硬阻断（字符数，0=不限制） */
   gateMaxLength: number;
   /** Phase 2: 内容最长长度——警告阈值（字符数） */
-  gateWarnLength: number;
+  gateWarnMaxLength: number;
   /** Phase 2: 链接占比阻断阈值（0-1） */
   gateLinkBlockRatio: number;
   /** Phase 2: 链接密度阻断阈值（个/百字） */
@@ -73,7 +73,7 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     crossBatchThreshold: 0.75,
     vaultHighThreshold: 0.80,
     vaultMidThreshold: 0.65,
-    reviewMinScore: 2,
+    reviewMinScore: 4,
     gateMinDensity: 0.15,
     gateWarnDensity: 0.50,
     gateMaxNoiseRatio: 0.75,
@@ -108,7 +108,7 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     crossBatchThreshold: 0.65,
     vaultHighThreshold: 0.70,
     vaultMidThreshold: 0.55,
-    reviewMinScore: 3,
+    reviewMinScore: 6,
     gateMinDensity: 0.15,
     gateWarnDensity: 0.50,
     gateMaxNoiseRatio: 0.70,
@@ -139,7 +139,7 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     crossBatchThreshold: 0.55,
     vaultHighThreshold: 0.60,
     vaultMidThreshold: 0.45,
-    reviewMinScore: 4,
+    reviewMinScore: 7,
     gateMinDensity: 0.15,
     gateWarnDensity: 0.50,
     gateMaxNoiseRatio: 0.65,

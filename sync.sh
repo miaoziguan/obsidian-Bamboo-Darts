@@ -66,6 +66,17 @@ else
     --external:obsidian --external:electron --external:crypto \
     --external:stream --external:http --external:https --external:url \
     --external:zlib --external:util --external:path --external:fs --external:os \
+    --external:@codemirror/autocomplete --external:@codemirror/closebrackets \
+    --external:@codemirror/collab --external:@codemirror/commands \
+    --external:@codemirror/comment --external:@codemirror/fold \
+    --external:@codemirror/gutter --external:@codemirror/highlight \
+    --external:@codemirror/history --external:@codemirror/language \
+    --external:@codemirror/lint --external:@codemirror/matchbrackets \
+    --external:@codemirror/panel --external:@codemirror/rangeset \
+    --external:@codemirror/rectangular-selection --external:@codemirror/search \
+    --external:@codemirror/state --external:@codemirror/stream-parser \
+    --external:@codemirror/text --external:@codemirror/tooltip \
+    --external:@codemirror/view \
     --format=cjs --target=es2018 \
     --sourcemap=inline \
     --outfile=main.js \

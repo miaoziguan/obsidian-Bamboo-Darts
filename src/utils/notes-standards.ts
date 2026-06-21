@@ -419,7 +419,7 @@ export function cleanTitle(raw: string): string {
   // 去掉加粗标记
   cleaned = cleaned.replace(/^\*\*|\*\*$/g, '');
   // 去掉首尾空白和标点
-  cleaned = cleaned.replace(/^[：:\s,，]+|[：:\s,，]+$/g, '');
+  cleaned = cleaned.replace(/^[：:\s,，]+|[：:\s,，]+$/, '');
 
   if (cleaned.length < 2) return '';
 

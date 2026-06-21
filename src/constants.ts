@@ -30,6 +30,9 @@ export const GATE_MAX_NOISE_RATIO = 0.7;
 /** AI 调用的 temperature 参数 */
 export const AI_TEMPERATURE = 0.3;
 
+/** 提炼整体超时（毫秒），超时后自动中止 */
+export const EXTRACTION_TIMEOUT_MS = 5 * 60 * 1000;
+
 /** 输入截断长度（限制发送给 AI 的文本量） */
 export const INPUT_TRUNCATE_LENGTH = 10000;
 
@@ -53,8 +56,17 @@ export const STOP_WORDS = new Set([
   '的', '了', '在', '是', '我', '有', '和', '就', '不', '人',
   '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你',
   '会', '着', '没有', '看', '好', '自己', '这',
+  // 扩充常用中文虚词
+  '他', '她', '它', '们', '吗', '呢', '吧', '啊', '哦', '嗯',
+  '把', '被', '让', '给', '从', '向', '往', '对', '比', '跟',
+  '那', '哪', '什么', '怎么', '为什么', '谁', '怎样', '如何',
+  '可以', '能', '可能', '应该', '需要', '已经', '正在', '还是',
+  '但是', '而且', '因为', '所以', '如果', '虽然', '然后', '或者',
+  // English stop words
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
   'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
+  'it', 'its', 'this', 'that', 'these', 'those', 'they', 'we', 'he', 'she',
+  'his', 'her', 'our', 'your', 'their', 'has', 'have', 'had', 'do', 'does',
 ]);
 
 // ─── 去重模块常量 ───
@@ -79,3 +91,6 @@ export const CONTENT_WEIGHT = 0.75;
 
 /** 短笔记放大阈值（字符数），短笔记 token 稀疏需放大相似度 */
 export const SHORT_NOTE_LENGTH = 100;
+
+/** 短笔记放大系数：短笔记 token 稀疏，相似度乘以该系数进行补偿 */
+export const SHORT_NOTE_BOOST_FACTOR = 1.15;

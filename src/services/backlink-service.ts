@@ -23,6 +23,9 @@ export function insertBacklinks(
       const backlink = `\n\n[[${noteName}]]\n`;
       const cursorPos = editor.getCursor();
       editor.replaceRange(backlink, cursorPos);
+      // 更新光标位置到插入内容之后，确保下一次插入顺序正确
+      const newOffset = editor.posToOffset(cursorPos) + backlink.length;
+      editor.setCursor(editor.offsetToPos(newOffset));
       success++;
     } catch {
       failed++;

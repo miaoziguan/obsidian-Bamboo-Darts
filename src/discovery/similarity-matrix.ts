@@ -85,7 +85,7 @@ export async function buildSimilarityMatrix(
   const notes: NoteMeta[] = [];
   const allFiles = vault.getMarkdownFiles();
   const files = targetFolder
-    ? allFiles.filter(f => f.path.startsWith(targetFolder))
+    ? allFiles.filter(f => f.path === targetFolder || f.path.startsWith(targetFolder + '/'))
     : allFiles;
 
   // Bug #18 修复：分批读取文件，避免内存飙升
@@ -106,12 +106,17 @@ export async function buildSimilarityMatrix(
   // Build keyword sets
   const keywordSets = notes.map(n => extractKeywords(n.content));
 
-  // Build similarity matrix (symmetric)
+  // Build similarity matrix (symmetric: 只计算上三角，然后镜像，计算量减半)
   const matrix: number[][] = [];
   for (let i = 0; i < notes.length; i++) {
-    matrix[i] = [];
-    for (let j = 0; j < notes.length; j++) {
-      matrix[i][j] = i === j ? 1 : jaccardSim(keywordSets[i], keywordSets[j]);
+    matrix[i] = new Array(notes.length).fill(0);
+    matrix[i][i] = 1;
+  }
+  for (let i = 0; i < notes.length; i++) {
+    for (let j = i + 1; j < notes.length; j++) {
+      const sim = jaccardSim(keywordSets[i], keywordSets[j]);
+      matrix[i][j] = sim;
+      matrix[j][i] = sim;
     }
   }
 

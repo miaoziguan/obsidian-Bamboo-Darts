@@ -121,7 +121,9 @@ describe('formatNoteAsMarkdown', () => {
     expect(md).toContain('---');
     expect(md).toContain('title: 测试笔记标题');
     expect(md).toContain('created: 2026-01-15T10:30:00Z');
-    expect(md).toContain('tags: ["测试", "知识库"]');
+    expect(md).toContain('tags:');
+    expect(md).toContain('  - "测试"');
+    expect(md).toContain('  - "知识库"');
   });
 
   it('应包含正文内容', () => {
@@ -194,6 +196,6 @@ describe('saveNotes', () => {
     const notes = [makeNote()];
     const result = await saveNotes(app, notes, { targetFolder: '' });
     expect(result.success).toBe(1);
-    expect(result.paths[0]).toContain('Atomic Notes/');
+    expect(result.paths[0]).toContain('原子笔记/');
   });
 });
