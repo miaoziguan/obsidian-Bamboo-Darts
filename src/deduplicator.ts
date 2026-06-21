@@ -235,7 +235,14 @@ class DedupCacheManager {
   }
 }
 
-const defaultDedupCache = new DedupCacheManager();
+let _defaultDedupCache: DedupCacheManager | null = null;
+
+export function getDefaultDedupCache(): DedupCacheManager {
+  if (!_defaultDedupCache) {
+    _defaultDedupCache = new DedupCacheManager();
+  }
+  return _defaultDedupCache;
+}
 
 // ─── 辅助：路径边界检查 ───
 
@@ -446,7 +453,7 @@ export async function checkAgainstVaultDetailed(
   vault: Vault,
   notes: AtomicNote[],
   targetFolder: string,
-  cacheManager: DedupCacheManager = defaultDedupCache,
+  cacheManager: DedupCacheManager = getDefaultDedupCache(),
   semanticManager?: SemanticDedupManager,
 ): Promise<VaultMatchInfo[]> {
   // 获取或构建知识库语料

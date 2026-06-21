@@ -1,5 +1,20 @@
 # Bamboo Darts 更新日志
 
+## v1.3.5 (2026-06-22)
+
+### Bug 修复
+
+- 修复 `defaultDedupCache is not defined` 运行时错误（`deduplicator.ts` 导出方式导致 esbuild tree-shaking 后变量丢失）
+  - 改用 `export function getDefaultDedupCache()` 懒初始化单例模式
+  - 涉及文件：`src/deduplicator.ts`、`src/extractor.ts`
+
+### 功能优化
+
+- 更新介绍面板（About Panel）Phase 4b 描述，补充语义去重（Beta）说明
+  - 涉及文件：`src/ui/about-content.ts`
+
+---
+
 ## v1.3.4 (2026-06-22)
 
 ### 语义去重（Beta）

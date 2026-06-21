@@ -11,7 +11,7 @@
 import { requestUrl, Vault } from 'obsidian';
 import { runGateChecks } from './gate';
 import { AtomicNote } from './utils/notes-standards';
-import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult, DuplicateInfo } from './deduplicator';
+import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult, DuplicateInfo, getDefaultDedupCache } from './deduplicator';
 import { SemanticDedupManager, isSemanticDedupEnabled } from './utils/embedding';
 import { classifyContent, resolveProfileConfig, ContentProfile, ProfileConfig } from './extraction/profiles';
 import { verifyClaims } from './extraction/fact-checker';
@@ -85,7 +85,7 @@ async function runVaultDedupPhase(
     config.vault,
     notes,
     config.dedupTargetFolder?.trim() || config.targetFolder || '',
-    defaultDedupCache,
+    getDefaultDedupCache(),
     config.semanticManager,
   );
 
