@@ -74,11 +74,12 @@ export class AtomicNotesPanel extends ItemView {
     const tabLabels = ['输入', '历史', '发现', '介绍'];
     const tabs: HTMLElement[] = [];
     for (let i = 0; i < tabLabels.length; i++) {
-      const tab = tabBar.createEl('button', {
+      const tab = tabBar.createEl('div', {
         text: tabLabels[i],
         cls: 'atomic-notes-tab' + (i === 0 ? ' active' : ''),
         attr: {
           role: 'tab',
+          tabindex: i === 0 ? '0' : '-1',
           'aria-selected': i === 0 ? 'true' : 'false',
           'aria-controls': `tab-panel-${i}`,
         },

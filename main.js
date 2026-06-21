@@ -4082,11 +4082,12 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
     const tabLabels = ["\u8F93\u5165", "\u5386\u53F2", "\u53D1\u73B0", "\u4ECB\u7ECD"];
     const tabs = [];
     for (let i = 0; i < tabLabels.length; i++) {
-      const tab = tabBar.createEl("button", {
+      const tab = tabBar.createEl("div", {
         text: tabLabels[i],
         cls: "atomic-notes-tab" + (i === 0 ? " active" : ""),
         attr: {
           role: "tab",
+          tabindex: i === 0 ? "0" : "-1",
           "aria-selected": i === 0 ? "true" : "false",
           "aria-controls": `tab-panel-${i}`
         }

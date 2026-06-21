@@ -25,9 +25,6 @@
   cursor: pointer;
   font-size: 13px;
   color: var(--text-muted);
-  border: none;
-  background: none;
-  font-family: inherit;
   border-bottom: 2px solid transparent;
   margin-bottom: -2px;
   transition: color 0.2s, border-color 0.2s;
