@@ -83,9 +83,17 @@ export default class AtomicNotesPlugin extends Plugin {
       callback: () => this.openPanelAt('split'),
     });
 
-    // 添加 ribbon 图标
+    // 添加 ribbon 图标（有选中文本→提炼，无选中文本→打开面板）
     this.addRibbonIcon('atom', '提炼原子笔记', () => {
-      this.extractFromSelection();
+      const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (activeView) {
+        const selection = activeView.editor.getSelection();
+        if (selection && selection.trim().length > 0) {
+          this.extractFromSelection();
+          return;
+        }
+      }
+      this.activateView();
     });
 
     // 添加右键菜单（编辑器内选中文本后右键）
@@ -214,20 +222,24 @@ export default class AtomicNotesPlugin extends Plugin {
     } catch (error) { new Notice('无法读取剪贴板，请检查权限'); }
   }
 
-  async runExtraction(input: { type: 'url' | 'text' | 'selection'; content: string }, opts: { onProgress?: ProgressCallback; skipGate?: boolean } = {}) {
+  async runExtraction(input: { type: 'url' | 'text' | 'selection'; content: string }, opts: { onProgress?: ProgressCallback; skipGate?: boolean; skipDuplicateCheck?: boolean } = {}) {
     if (this._isExtracting) { new Notice('已有提取任务在进行中，请等待完成后再试'); return; }
+
+    // 重复提炼检测（在正式开始前检查，给用户选择权）
+    if (!opts.skipDuplicateCheck) {
+      const sourceHash = computeSourceHash(input.content);
+      const previous = findPreviousExtraction(this.settings.extractionHistory || [], sourceHash);
+      if (previous) {
+        this.showDuplicateConfirm(input, previous, opts);
+        return;
+      }
+    }
+
     this._isExtracting = true;
     if (!this.settings.deepseekApiKey) {
       new Notice('请先在设置中填写 DeepSeek API Key');
       this._isExtracting = false;
       return;
-    }
-    const sourceHash = computeSourceHash(input.content);
-    const previous = findPreviousExtraction(this.settings.extractionHistory || [], sourceHash);
-    if (previous) {
-      const daysAgo = Math.floor((Date.now() - new Date(previous.extractedAt).getTime()) / (1000 * 60 * 60 * 24));
-      const timeStr = daysAgo === 0 ? '今天' : `${daysAgo}天前`;
-      new Notice(`此内容已在${timeStr}提炼过（${previous.noteCount}条笔记），如需重新提炼请继续等待`);
     }
     this._abortController = new AbortController();
     let progressModal: Modal | null = null;
@@ -235,13 +247,25 @@ export default class AtomicNotesPlugin extends Plugin {
     if (!progressCb) {
       const m = new (class extends Modal {
         _title: HTMLElement; _body: HTMLElement;
-        constructor(p: Plugin) { super(p.app); }
+        _cancelBtn: HTMLButtonElement | null = null;
+        _plugin: AtomicNotesPlugin;
+        constructor(p: Plugin) { super(p.app); this._plugin = p as AtomicNotesPlugin; }
         onOpen() {
           this.containerEl.style.zIndex = '1000';
           this.modalEl.style.minWidth = '280px';
           this.modalEl.style.maxWidth = '420px';
           this._title = this.contentEl.createEl('div', { attr: { style: 'font-weight:bold;font-size:13px;margin-bottom:8px' }, text: '正在提炼原子笔记...' });
           this._body = this.contentEl.createEl('div', { attr: { style: 'font-size:12px;color:var(--text-muted);line-height:1.6;max-height:200px;overflow-y:auto' } });
+          // 取消按钮
+          const btnRow = this.contentEl.createEl('div', { attr: { style: 'display:flex;justify-content:flex-end;margin-top:12px' } });
+          this._cancelBtn = btnRow.createEl('button', { text: '取消提炼', attr: { style: 'font-size:12px;padding:4px 16px;cursor:pointer' } });
+          this._cancelBtn.addEventListener('click', () => {
+            this._plugin.cancelExtraction();
+            if (this._cancelBtn) {
+              this._cancelBtn.disabled = true;
+              this._cancelBtn.setText('取消中...');
+            }
+          });
         }
         update(event: ProgressEvent, allEvents: ProgressEvent[], totalMs: number) {
           this._title.setText(`${event.phase}：${event.name} — 已用时 ${(totalMs / 1000).toFixed(1)}s`);
@@ -423,6 +447,73 @@ export default class AtomicNotesPlugin extends Plugin {
 
       onClose() { this.contentEl.empty(); }
     })(this, input, gateError);
+
+    modal.open();
+  }
+
+  /**
+   * 重复提炼确认框
+   */
+  private showDuplicateConfirm(
+    input: { type: 'url' | 'text' | 'selection'; content: string },
+    previous: { extractedAt: string; noteCount: number; savedPaths?: string[] },
+    opts: { onProgress?: ProgressCallback; skipGate?: boolean }
+  ) {
+    const daysAgo = Math.floor((Date.now() - new Date(previous.extractedAt).getTime()) / (1000 * 60 * 60 * 24));
+    const timeStr = daysAgo === 0 ? '今天' : `${daysAgo}天前`;
+
+    const modal = new (class extends Modal {
+      plugin: AtomicNotesPlugin;
+      constructor(plugin: AtomicNotesPlugin) { super(plugin.app); this.plugin = plugin; }
+
+      onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.createEl('h3', { text: '⚠️ 此内容已提炼过' });
+
+        const infoBox = contentEl.createEl('div', {
+          attr: {
+            style: [
+              'background:var(--background-secondary)',
+              'border-left:3px solid var(--color-orange)',
+              'border-radius:6px',
+              'padding:8px 12px',
+              'margin:10px 0',
+              'font-size:13px',
+              'color:var(--text-muted)',
+            ].join(';'),
+          },
+        });
+        infoBox.setText(`此内容已在${timeStr}提炼过，共 ${previous.noteCount} 条笔记。`);
+
+        const btnRow = contentEl.createEl('div', {
+          attr: { style: 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px' },
+        });
+
+        const cancelBtn = btnRow.createEl('button', { text: '取消' });
+        cancelBtn.addEventListener('click', () => this.close());
+
+        if (previous.savedPaths && previous.savedPaths.length > 0) {
+          const viewBtn = btnRow.createEl('button', { text: '查看上次结果' });
+          viewBtn.addEventListener('click', () => {
+            this.close();
+            const firstPath = previous.savedPaths![0];
+            this.plugin.app.workspace.openLinkText(firstPath, '', false);
+          });
+        }
+
+        const reExtractBtn = btnRow.createEl('button', {
+          text: '重新提炼',
+          attr: { style: 'background:var(--interactive-accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600' },
+        });
+        reExtractBtn.addEventListener('click', async () => {
+          this.close();
+          await this.plugin.runExtraction(input, { ...opts, skipDuplicateCheck: true });
+        });
+      }
+
+      onClose() { this.contentEl.empty(); }
+    })(this);
 
     modal.open();
   }

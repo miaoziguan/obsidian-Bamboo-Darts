@@ -10,6 +10,7 @@ import {
   ItemView,
   WorkspaceLeaf,
   Notice,
+  Modal,
 } from 'obsidian';
 import AtomicNotesPlugin from '../main';
 import { buildSimilarityMatrix, NoteMeta } from '../discovery/similarity-matrix';
@@ -38,6 +39,9 @@ export class AtomicNotesPanel extends ItemView {
   /** 输入面板状态 */
   private _inputElements: InputElements | null = null;
   private _inputSubMode: 'text' | 'url' = 'text';
+
+  /** 发现面板相似度矩阵缓存 */
+  private _simCache: { folder: string; noteCount: number; notes: NoteMeta[]; matrix: number[][] } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: AtomicNotesPlugin) {
     super(leaf);
@@ -157,8 +161,11 @@ export class AtomicNotesPanel extends ItemView {
 
     const urlMeta = panel.createEl('div', { cls: 'atomic-notes-meta-row' });
     urlMeta.style.display = 'none';
-    urlMeta.createEl('span');
-    const clearUrlLink = urlMeta.createEl('a', {
+    const urlMetaActions = urlMeta.createEl('div', { attr: { style: 'display:flex;gap:8px;align-items:center' } });
+    const pasteUrlBtn = urlMetaActions.createEl('a', {
+      cls: 'atomic-notes-clip-btn', text: '粘贴剪贴板URL', attr: { href: '#' },
+    });
+    urlMetaActions.createEl('a', {
       cls: 'atomic-notes-clear-link', text: '清除', attr: { href: '#' },
     });
 
@@ -211,6 +218,24 @@ export class AtomicNotesPanel extends ItemView {
       charCountEl.setText('0 字');
     });
 
+    // 粘贴剪贴板 URL
+    pasteUrlBtn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      try {
+        const rawText = await navigator.clipboard.readText();
+        if (rawText && rawText.trim()) {
+          urlInput.value = rawText.trim();
+          new Notice('已粘贴剪贴板内容');
+        } else {
+          new Notice('剪贴板为空');
+        }
+      } catch {
+        new Notice('无法读取剪贴板，请检查权限');
+      }
+    });
+
+    // 清除 URL
+    const clearUrlLink = urlMetaActions.querySelector('.atomic-notes-clear-link') as HTMLAnchorElement;
     clearUrlLink.addEventListener('click', (ev) => {
       ev.preventDefault();
       urlInput.value = '';
@@ -244,10 +269,35 @@ export class AtomicNotesPanel extends ItemView {
       attr: { style: 'padding:2px 10px;font-size:11px;cursor:pointer;background:var(--background-modifier-error);color:var(--text-on-accent);border:none;border-radius:4px' },
     });
     clearBtn.addEventListener('click', async () => {
-      this.plugin.settings.extractionHistory = [];
-      await this.plugin.saveSettings();
-      new Notice('历史记录已清空');
-      this.renderHistoryPanel(el);
+      // 二次确认
+      const confirmModal = new (class extends Modal {
+        parent: AtomicNotesPanel;
+        targetEl: HTMLElement;
+        constructor(app: any, parent: AtomicNotesPanel, targetEl: HTMLElement) { super(app); this.parent = parent; this.targetEl = targetEl; }
+        onOpen() {
+          this.contentEl.empty();
+          this.contentEl.createEl('h3', { text: '确认清空全部历史记录？' });
+          this.contentEl.createEl('p', {
+            text: `这将删除全部 ${history.length} 条提炼历史，已保存的笔记不会受影响。`,
+            attr: { style: 'font-size:13px;color:var(--text-muted);margin:8px 0' },
+          });
+          const btnRow = this.contentEl.createEl('div', { attr: { style: 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px' } });
+          btnRow.createEl('button', { text: '取消' }).addEventListener('click', () => this.close());
+          const confirmBtn = btnRow.createEl('button', {
+            text: '确认清空',
+            attr: { style: 'background:var(--background-modifier-error);color:var(--text-on-accent);border:none;padding:6px 16px;border-radius:6px;cursor:pointer' },
+          });
+          confirmBtn.addEventListener('click', async () => {
+            this.parent.plugin.settings.extractionHistory = [];
+            await this.parent.plugin.saveSettings();
+            new Notice('历史记录已清空');
+            this.close();
+            this.parent.renderHistoryPanel(this.targetEl);
+          });
+        }
+        onClose() { this.contentEl.empty(); }
+      })(this.app, this, el);
+      confirmModal.open();
     });
 
     const listEl = el.createEl('div');
@@ -276,7 +326,22 @@ export class AtomicNotesPanel extends ItemView {
         text: '\u00D7',
         attr: { style: 'font-size:16px;color:var(--text-muted);cursor:pointer;padding:0 4px;line-height:1' },
       });
+      let delConfirming = false;
       delBtn.addEventListener('click', async () => {
+        if (!delConfirming) {
+          delConfirming = true;
+          delBtn.setText('确认?');
+          delBtn.style.color = 'var(--color-red)';
+          // 3 秒后自动恢复
+          setTimeout(() => {
+            if (delConfirming) {
+              delConfirming = false;
+              delBtn.setText('\u00D7');
+              delBtn.style.color = 'var(--text-muted)';
+            }
+          }, 3000);
+          return;
+        }
         this.plugin.settings.extractionHistory!.splice(idx, 1);
         await this.plugin.saveSettings();
         this.renderHistoryPanel(el);
@@ -545,7 +610,19 @@ export class AtomicNotesPanel extends ItemView {
           new Notice('请输入有效的 URL');
           return;
         }
-        inputData = { type: 'url', content: inputContent.trim() };
+        // URL 格式校验
+        const url = inputContent.trim();
+        try {
+          const parsed = new URL(url);
+          if (!['http:', 'https:'].includes(parsed.protocol)) {
+            new Notice('URL 必须以 http:// 或 https:// 开头');
+            return;
+          }
+        } catch {
+          new Notice('URL 格式不正确，请检查');
+          return;
+        }
+        inputData = { type: 'url', content: url };
       } else {
         inputContent = elements.textarea.value;
         if (!inputContent || !inputContent.trim()) {
@@ -692,7 +769,20 @@ export class AtomicNotesPanel extends ItemView {
       });
 
       try {
-        const { notes, matrix } = await buildSimilarityMatrix(app.vault, settings.targetFolder);
+        // 使用缓存的相似度矩阵（同文件夹且笔记数量未变时复用）
+        const currentFolder = settings.targetFolder || '';
+        const currentCount = files.length;
+        if (!this._simCache || this._simCache.folder !== currentFolder || this._simCache.noteCount !== currentCount) {
+          const built = await buildSimilarityMatrix(app.vault, settings.targetFolder);
+          this._simCache = {
+            folder: currentFolder,
+            noteCount: built.notes.length,
+            notes: built.notes,
+            matrix: built.matrix,
+          };
+        }
+        const notes = this._simCache.notes;
+        const matrix = this._simCache.matrix;
         const idx = notes.findIndex((n: NoteMeta) => n.path === selectedPath);
 
         if (idx < 0) {

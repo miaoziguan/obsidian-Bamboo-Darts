@@ -335,12 +335,20 @@ export class ResultModal extends Modal {
 
   /** 刷新笔记卡片列表（用于恢复/变更后重新渲染） */
   private notesListEl: HTMLElement | null = null;
+  private cardsContainerEl: HTMLElement | null = null;
   private refreshNotesList() {
     if (!this.notesListEl) return;
     const parent = this.notesListEl.parentElement;
     if (!parent) return;
     this.notesListEl.detach();
     this.renderNotes(parent);
+  }
+
+  /** 仅刷新卡片区域（搜索/筛选时用，不重建工具栏） */
+  private refreshFilteredNotes() {
+    if (!this.cardsContainerEl) return;
+    this.cardsContainerEl.empty();
+    this.renderNoteCardsInto(this.cardsContainerEl);
   }
 
   /** 疑似重复确认 UI（中相似度 60-80%） */
@@ -489,10 +497,45 @@ export class ResultModal extends Modal {
     });
   }
 
+  /** 当前筛选状态 */
+  private filterMode: 'all' | 'issues' | 'traced' = 'all';
+  /** 当前搜索关键词 */
+  private searchQuery = '';
+  /** 筛选后可见的笔记索引列表 */
+  private visibleIndices: number[] = [];
+
+  /** 判断笔记是否属于"有问题"（需对比或超源） */
+  private noteHasIssues(i: number): boolean {
+    const note = this.result.notes[i];
+    return (note.needsCompareCount ?? 0) > 0 || (note.outOfScopeCount ?? 0) > 0;
+  }
+
+  /** 判断笔记是否属于"已溯源"（有溯源且无问题） */
+  private noteIsTraced(i: number): boolean {
+    const note = this.result.notes[i];
+    return (note.tracedCount ?? 0) > 0 && (note.needsCompareCount ?? 0) === 0 && (note.outOfScopeCount ?? 0) === 0;
+  }
+
+  /** 笔记是否匹配当前筛选条件 */
+  private noteMatchesFilter(i: number): boolean {
+    if (this.filterMode === 'issues') return this.noteHasIssues(i);
+    if (this.filterMode === 'traced') return this.noteIsTraced(i);
+    return true; // 'all'
+  }
+
+  /** 笔记是否匹配搜索关键词 */
+  private noteMatchesSearch(i: number): boolean {
+    if (!this.searchQuery) return true;
+    const note = this.result.notes[i];
+    const q = this.searchQuery.toLowerCase();
+    return (note.title || '').toLowerCase().includes(q) || (note.content || '').toLowerCase().includes(q);
+  }
+
   /** 卡片式笔记列表 */
   private renderNotes(container: HTMLElement) {
     const notesEl = container.createEl('div');
     this.notesListEl = notesEl;
+
     const headerEl = notesEl.createEl('div', {
       attr: { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px' },
     });
@@ -517,9 +560,90 @@ export class ResultModal extends Modal {
       this.updateSelectionCount();
     });
 
+    // ── 筛选栏 + 搜索框 ──
+    const toolbar = notesEl.createEl('div', {
+      attr: { style: 'display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap' },
+    });
+
+    // 筛选按钮组
+    const filterGroup = toolbar.createEl('div', {
+      attr: { style: 'display:flex;gap:4px' },
+    });
+
+    const filterBtns: { mode: 'all' | 'issues' | 'traced'; label: string }[] = [
+      { mode: 'all', label: '全部' },
+      { mode: 'issues', label: '有问题' },
+      { mode: 'traced', label: '已溯源' },
+    ];
+
+    const filterBtnEls: Record<string, HTMLButtonElement> = {};
+
+    for (const { mode, label } of filterBtns) {
+      const count = mode === 'all'
+        ? this.result.notes.length
+        : mode === 'issues'
+          ? this.result.notes.filter((_, i) => this.noteHasIssues(i)).length
+          : this.result.notes.filter((_, i) => this.noteIsTraced(i)).length;
+
+      const btn = filterGroup.createEl('button', {
+        text: `${label}${count > 0 ? ` (${count})` : ''}`,
+        attr: {
+          style: `font-size:11px;padding:3px 10px;cursor:pointer;border-radius:6px;border:1px solid var(--background-modifier-border);background:${this.filterMode === mode ? 'var(--interactive-accent)' : 'var(--background-secondary)'};color:${this.filterMode === mode ? 'var(--text-on-accent)' : 'var(--text-muted)'}`,
+        },
+      });
+      btn.addEventListener('click', () => {
+        this.filterMode = mode;
+        // 更新筛选按钮样式
+        for (const [m, b] of Object.entries(filterBtnEls)) {
+          const isActive = m === mode;
+          b.style.background = isActive ? 'var(--interactive-accent)' : 'var(--background-secondary)';
+          b.style.color = isActive ? 'var(--text-on-accent)' : 'var(--text-muted)';
+        }
+        this.refreshFilteredNotes();
+      });
+      filterBtnEls[mode] = btn;
+    }
+
+    // 搜索框
+    const searchInput = toolbar.createEl('input', {
+      attr: {
+        type: 'text',
+        placeholder: '搜索标题或内容...',
+        style: 'flex:1;min-width:120px;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-primary)',
+      },
+    }) as HTMLInputElement;
+    searchInput.addEventListener('input', () => {
+      this.searchQuery = searchInput.value.trim();
+      this.refreshFilteredNotes();
+    });
+
+    // 渲染笔记卡片容器
+    this.cardsContainerEl = notesEl.createEl('div', { cls: 'atomic-notes-cards-container' });
+    this.renderNoteCardsInto(this.cardsContainerEl);
+  }
+
+  /** 渲染笔记卡片到指定容器（受筛选和搜索控制） */
+  private renderNoteCardsInto(container: HTMLElement) {
+    // 计算可见索引
+    this.visibleIndices = [];
     for (let i = 0; i < this.result.notes.length; i++) {
+      if (this.noteMatchesFilter(i) && this.noteMatchesSearch(i)) {
+        this.visibleIndices.push(i);
+      }
+    }
+
+    // 无结果提示
+    if (this.visibleIndices.length === 0) {
+      container.createEl('div', {
+        text: '没有匹配的笔记',
+        attr: { style: 'color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center' },
+      });
+      return;
+    }
+
+    for (const i of this.visibleIndices) {
       const note = this.result.notes[i];
-      const card = notesEl.createEl('div', { cls: 'atomic-notes-card' });
+      const card = container.createEl('div', { cls: 'atomic-notes-card' });
 
       // ── 标题行：复选框 + 标题 + 核查徽标 ──
       const headerRow = card.createEl('div', { cls: 'atomic-notes-card-header' });

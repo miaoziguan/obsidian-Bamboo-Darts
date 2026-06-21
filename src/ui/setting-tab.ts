@@ -131,15 +131,16 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('API Key')
       .setDesc('你的 API Key（必需）')
-      .addText(text =>
+      .addText(text => {
         text
           .setPlaceholder('sk-...')
           .setValue(this.plugin.settings.deepseekApiKey)
           .onChange(async value => {
             this.plugin.settings.deepseekApiKey = value.trim();
             await this.plugin.saveSettings();
-          })
-      );
+          });
+        text.inputEl.type = 'password';
+      });
 
     new Setting(containerEl)
       .setName('API URL')
@@ -342,7 +343,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // ================================================================
     containerEl.createEl('h3', { text: '笔记复查（AI 双重保险）' });
 
-    new Setting(containerEl)
+    const reviewToggleSetting = new Setting(containerEl)
       .setName('启用笔记复查')
       .setDesc('提炼完成后，用 AI 对笔记价值评分，自动过滤低质量笔记（评分<3）')
       .addToggle(toggle =>
@@ -351,9 +352,11 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           .onChange(async value => {
             this.plugin.settings.enableReview = value;
             await this.plugin.saveSettings();
+            this.display();
           })
       );
 
+    if (this.plugin.settings.enableReview) {
     new Setting(containerEl)
       .setName('复查模型（可选）')
       .setDesc('复查用模型名称（如 gpt-4o、claude-3-5-sonnet）。留空则复用提炼模型')
@@ -392,6 +395,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+    } // end if enableReview
 
     // ================================================================
     // ⑧ 笔记发现（知识发现）
@@ -528,35 +532,43 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
             new Setting(advancedContainer)
               .setName('批内去重严格度')
-              .setDesc('同批提炼的笔记之间，相似度多高才算重复？值越高越宽松，保留更多相似笔记')
-              .addText(t => t.setValue(String(cfg.crossBatchThreshold)).onChange(async v => {
-                const n = parseFloat(v);
-                if (!isNaN(n) && n > 0 && n <= 1) { this.plugin.settings[key].crossBatchThreshold = n; await this.plugin.saveSettings(); }
-              }));
+              .setDesc('同批提炼的笔记之间，相似度多高才算重复？值越高越宽松')
+              .addSlider(s => s
+                .setLimits(0.3, 1.0, 0.05)
+                .setValue(cfg.crossBatchThreshold)
+                .setDynamicTooltip()
+                .onChange(async v => { this.plugin.settings[key].crossBatchThreshold = v; await this.plugin.saveSettings(); })
+              );
 
             new Setting(advancedContainer)
               .setName('与已有笔记去重（自动丢弃）')
-              .setDesc('和知识库已有笔记太相似时直接丢弃，避免重复。值越高越宽松')
-              .addText(t => t.setValue(String(cfg.vaultHighThreshold)).onChange(async v => {
-                const n = parseFloat(v);
-                if (!isNaN(n) && n > 0 && n <= 1) { this.plugin.settings[key].vaultHighThreshold = n; await this.plugin.saveSettings(); }
-              }));
+              .setDesc('和知识库已有笔记太相似时直接丢弃。值越高越宽松')
+              .addSlider(s => s
+                .setLimits(0.5, 1.0, 0.05)
+                .setValue(cfg.vaultHighThreshold)
+                .setDynamicTooltip()
+                .onChange(async v => { this.plugin.settings[key].vaultHighThreshold = v; await this.plugin.saveSettings(); })
+              );
 
             new Setting(advancedContainer)
               .setName('与已有笔记去重（待确认）')
               .setDesc('相似度低于上一条但仍较高时，标记为"待确认"让你手动决定')
-              .addText(t => t.setValue(String(cfg.vaultMidThreshold)).onChange(async v => {
-                const n = parseFloat(v);
-                if (!isNaN(n) && n > 0 && n <= 1) { this.plugin.settings[key].vaultMidThreshold = n; await this.plugin.saveSettings(); }
-              }));
+              .addSlider(s => s
+                .setLimits(0.3, 0.9, 0.05)
+                .setValue(cfg.vaultMidThreshold)
+                .setDynamicTooltip()
+                .onChange(async v => { this.plugin.settings[key].vaultMidThreshold = v; await this.plugin.saveSettings(); })
+              );
 
             new Setting(advancedContainer)
               .setName('质量评分门槛')
-              .setDesc('AI 复查评分（1-5 分）低于此值的笔记会被丢弃。值越低保留越多')
-              .addText(t => t.setValue(String(cfg.reviewMinScore)).onChange(async v => {
-                const n = parseInt(v, 10);
-                if (!isNaN(n) && n >= 1 && n <= 5) { this.plugin.settings[key].reviewMinScore = n; await this.plugin.saveSettings(); }
-              }));
+              .setDesc('AI 复查评分低于此值的笔记会被丢弃。值越低保留越多')
+              .addSlider(s => s
+                .setLimits(1, 5, 1)
+                .setValue(cfg.reviewMinScore)
+                .setDynamicTooltip()
+                .onChange(async v => { this.plugin.settings[key].reviewMinScore = v; await this.plugin.saveSettings(); })
+              );
           }
         } else if (!show && advancedContainer) {
           advancedContainer.remove();
@@ -621,6 +633,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     try {
       new Notice('正在测试连接...');
 
+      const startTime = Date.now();
       const response = await requestUrl({
         url: deepseekApiUrl,
         method: 'POST',
@@ -634,14 +647,28 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           max_tokens: 10,
         }),
       });
+      const latency = Date.now() - startTime;
 
       if (response.status === 200) {
-        new Notice('API 连接成功！');
+        const respModel = response.json?.model || model;
+        const tokensUsed = response.json?.usage?.total_tokens;
+        const tokenInfo = tokensUsed ? ` · 消耗 ${tokensUsed} tokens` : '';
+        new Notice(`✓ 连接成功 · 模型: ${respModel} · 延迟: ${latency}ms${tokenInfo}`, 8000);
       } else {
-        new Notice(`API 连接失败：${response.status}`);
+        new Notice(`API 连接失败：HTTP ${response.status}`, 8000);
       }
     } catch (error) {
-      new Notice(`API 连接失败：${error instanceof Error ? error.message : String(error)}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      // 友好化常见错误
+      let friendly = msg;
+      if (msg.includes('401') || msg.includes('Unauthorized')) {
+        friendly = 'API Key 无效或已过期，请检查';
+      } else if (msg.includes('429')) {
+        friendly = '请求过于频繁或额度不足，请稍后重试';
+      } else if (msg.includes('Failed to fetch') || msg.includes('network')) {
+        friendly = '网络连接失败，请检查 API URL 或网络设置';
+      }
+      new Notice(`✗ 连接失败：${friendly}`, 10000);
     }
   }
 }

@@ -390,12 +390,13 @@ var AtomicNotesSettingTab = class extends import_obsidian.PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "\u539F\u5B50\u7B14\u8BB0\u63D0\u70BC \u8BBE\u7F6E" });
     containerEl.createEl("h3", { text: "API \u914D\u7F6E" });
-    new import_obsidian.Setting(containerEl).setName("API Key").setDesc("\u4F60\u7684 API Key\uFF08\u5FC5\u9700\uFF09").addText(
-      (text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.deepseekApiKey).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("API Key").setDesc("\u4F60\u7684 API Key\uFF08\u5FC5\u9700\uFF09").addText((text) => {
+      text.setPlaceholder("sk-...").setValue(this.plugin.settings.deepseekApiKey).onChange(async (value) => {
         this.plugin.settings.deepseekApiKey = value.trim();
         await this.plugin.saveSettings();
-      })
-    );
+      });
+      text.inputEl.type = "password";
+    });
     new import_obsidian.Setting(containerEl).setName("API URL").setDesc("API \u5730\u5740\uFF08\u9ED8\u8BA4\uFF1ADeepSeek\uFF09").addText(
       (text) => text.setValue(this.plugin.settings.deepseekApiUrl).onChange(async (value) => {
         this.plugin.settings.deepseekApiUrl = value.trim();
@@ -486,30 +487,33 @@ var AtomicNotesSettingTab = class extends import_obsidian.PluginSettingTab {
     );
     this.addDivider(containerEl);
     containerEl.createEl("h3", { text: "\u7B14\u8BB0\u590D\u67E5\uFF08AI \u53CC\u91CD\u4FDD\u9669\uFF09" });
-    new import_obsidian.Setting(containerEl).setName("\u542F\u7528\u7B14\u8BB0\u590D\u67E5").setDesc("\u63D0\u70BC\u5B8C\u6210\u540E\uFF0C\u7528 AI \u5BF9\u7B14\u8BB0\u4EF7\u503C\u8BC4\u5206\uFF0C\u81EA\u52A8\u8FC7\u6EE4\u4F4E\u8D28\u91CF\u7B14\u8BB0\uFF08\u8BC4\u5206<3\uFF09").addToggle(
+    const reviewToggleSetting = new import_obsidian.Setting(containerEl).setName("\u542F\u7528\u7B14\u8BB0\u590D\u67E5").setDesc("\u63D0\u70BC\u5B8C\u6210\u540E\uFF0C\u7528 AI \u5BF9\u7B14\u8BB0\u4EF7\u503C\u8BC4\u5206\uFF0C\u81EA\u52A8\u8FC7\u6EE4\u4F4E\u8D28\u91CF\u7B14\u8BB0\uFF08\u8BC4\u5206<3\uFF09").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableReview || false).onChange(async (value) => {
         this.plugin.settings.enableReview = value;
         await this.plugin.saveSettings();
+        this.display();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("\u590D\u67E5\u6A21\u578B\uFF08\u53EF\u9009\uFF09").setDesc("\u590D\u67E5\u7528\u6A21\u578B\u540D\u79F0\uFF08\u5982 gpt-4o\u3001claude-3-5-sonnet\uFF09\u3002\u7559\u7A7A\u5219\u590D\u7528\u63D0\u70BC\u6A21\u578B").addText(
-      (text) => text.setPlaceholder("\u7559\u7A7A\u5219\u4F7F\u7528\u63D0\u70BC\u6A21\u578B").setValue(this.plugin.settings.reviewModel || "").onChange(async (value) => {
-        this.plugin.settings.reviewModel = value.trim();
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("\u590D\u67E5 API URL\uFF08\u53EF\u9009\uFF09").setDesc("\u590D\u67E5\u7528 API \u5730\u5740\u3002\u7559\u7A7A\u5219\u590D\u7528\u63D0\u70BC API \u5730\u5740").addText(
-      (text) => text.setPlaceholder("\u7559\u7A7A\u5219\u4F7F\u7528\u63D0\u70BC API \u5730\u5740").setValue(this.plugin.settings.reviewApiUrl || "").onChange(async (value) => {
-        this.plugin.settings.reviewApiUrl = value.trim();
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("\u590D\u67E5 API Key\uFF08\u53EF\u9009\uFF09").setDesc("\u590D\u67E5\u7528 API Key\u3002\u7559\u7A7A\u5219\u590D\u7528\u63D0\u70BC API Key").addText(
-      (text) => text.setPlaceholder("\u7559\u7A7A\u5219\u4F7F\u7528\u63D0\u70BC API Key").setValue(this.plugin.settings.reviewApiKey || "").onChange(async (value) => {
-        this.plugin.settings.reviewApiKey = value.trim();
-        await this.plugin.saveSettings();
-      })
-    );
+    if (this.plugin.settings.enableReview) {
+      new import_obsidian.Setting(containerEl).setName("\u590D\u67E5\u6A21\u578B\uFF08\u53EF\u9009\uFF09").setDesc("\u590D\u67E5\u7528\u6A21\u578B\u540D\u79F0\uFF08\u5982 gpt-4o\u3001claude-3-5-sonnet\uFF09\u3002\u7559\u7A7A\u5219\u590D\u7528\u63D0\u70BC\u6A21\u578B").addText(
+        (text) => text.setPlaceholder("\u7559\u7A7A\u5219\u4F7F\u7528\u63D0\u70BC\u6A21\u578B").setValue(this.plugin.settings.reviewModel || "").onChange(async (value) => {
+          this.plugin.settings.reviewModel = value.trim();
+          await this.plugin.saveSettings();
+        })
+      );
+      new import_obsidian.Setting(containerEl).setName("\u590D\u67E5 API URL\uFF08\u53EF\u9009\uFF09").setDesc("\u590D\u67E5\u7528 API \u5730\u5740\u3002\u7559\u7A7A\u5219\u590D\u7528\u63D0\u70BC API \u5730\u5740").addText(
+        (text) => text.setPlaceholder("\u7559\u7A7A\u5219\u4F7F\u7528\u63D0\u70BC API \u5730\u5740").setValue(this.plugin.settings.reviewApiUrl || "").onChange(async (value) => {
+          this.plugin.settings.reviewApiUrl = value.trim();
+          await this.plugin.saveSettings();
+        })
+      );
+      new import_obsidian.Setting(containerEl).setName("\u590D\u67E5 API Key\uFF08\u53EF\u9009\uFF09").setDesc("\u590D\u67E5\u7528 API Key\u3002\u7559\u7A7A\u5219\u590D\u7528\u63D0\u70BC API Key").addText(
+        (text) => text.setPlaceholder("\u7559\u7A7A\u5219\u4F7F\u7528\u63D0\u70BC API Key").setValue(this.plugin.settings.reviewApiKey || "").onChange(async (value) => {
+          this.plugin.settings.reviewApiKey = value.trim();
+          await this.plugin.saveSettings();
+        })
+      );
+    }
     containerEl.createEl("h3", { text: "\u7B14\u8BB0\u53D1\u73B0" });
     new import_obsidian.Setting(containerEl).setName("\u542F\u7528\u5173\u8054\u63A8\u8350").setDesc("\u9009\u4E2D\u7B14\u8BB0\u540E\u663E\u793A Top10 \u76F8\u5173\u7B14\u8BB0").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.discoveryRecommendation).onChange(async (value) => {
@@ -592,34 +596,30 @@ var AtomicNotesSettingTab = class extends import_obsidian.PluginSettingTab {
           for (const { key, label } of profiles) {
             const cfg = this.plugin.settings[key];
             advancedContainer.createEl("h4", { text: label, cls: "filter-profile-group" });
-            new import_obsidian.Setting(advancedContainer).setName("\u6279\u5185\u53BB\u91CD\u4E25\u683C\u5EA6").setDesc("\u540C\u6279\u63D0\u70BC\u7684\u7B14\u8BB0\u4E4B\u95F4\uFF0C\u76F8\u4F3C\u5EA6\u591A\u9AD8\u624D\u7B97\u91CD\u590D\uFF1F\u503C\u8D8A\u9AD8\u8D8A\u5BBD\u677E\uFF0C\u4FDD\u7559\u66F4\u591A\u76F8\u4F3C\u7B14\u8BB0").addText((t) => t.setValue(String(cfg.crossBatchThreshold)).onChange(async (v) => {
-              const n = parseFloat(v);
-              if (!isNaN(n) && n > 0 && n <= 1) {
-                this.plugin.settings[key].crossBatchThreshold = n;
+            new import_obsidian.Setting(advancedContainer).setName("\u6279\u5185\u53BB\u91CD\u4E25\u683C\u5EA6").setDesc("\u540C\u6279\u63D0\u70BC\u7684\u7B14\u8BB0\u4E4B\u95F4\uFF0C\u76F8\u4F3C\u5EA6\u591A\u9AD8\u624D\u7B97\u91CD\u590D\uFF1F\u503C\u8D8A\u9AD8\u8D8A\u5BBD\u677E").addSlider(
+              (s) => s.setLimits(0.3, 1, 0.05).setValue(cfg.crossBatchThreshold).setDynamicTooltip().onChange(async (v) => {
+                this.plugin.settings[key].crossBatchThreshold = v;
                 await this.plugin.saveSettings();
-              }
-            }));
-            new import_obsidian.Setting(advancedContainer).setName("\u4E0E\u5DF2\u6709\u7B14\u8BB0\u53BB\u91CD\uFF08\u81EA\u52A8\u4E22\u5F03\uFF09").setDesc("\u548C\u77E5\u8BC6\u5E93\u5DF2\u6709\u7B14\u8BB0\u592A\u76F8\u4F3C\u65F6\u76F4\u63A5\u4E22\u5F03\uFF0C\u907F\u514D\u91CD\u590D\u3002\u503C\u8D8A\u9AD8\u8D8A\u5BBD\u677E").addText((t) => t.setValue(String(cfg.vaultHighThreshold)).onChange(async (v) => {
-              const n = parseFloat(v);
-              if (!isNaN(n) && n > 0 && n <= 1) {
-                this.plugin.settings[key].vaultHighThreshold = n;
+              })
+            );
+            new import_obsidian.Setting(advancedContainer).setName("\u4E0E\u5DF2\u6709\u7B14\u8BB0\u53BB\u91CD\uFF08\u81EA\u52A8\u4E22\u5F03\uFF09").setDesc("\u548C\u77E5\u8BC6\u5E93\u5DF2\u6709\u7B14\u8BB0\u592A\u76F8\u4F3C\u65F6\u76F4\u63A5\u4E22\u5F03\u3002\u503C\u8D8A\u9AD8\u8D8A\u5BBD\u677E").addSlider(
+              (s) => s.setLimits(0.5, 1, 0.05).setValue(cfg.vaultHighThreshold).setDynamicTooltip().onChange(async (v) => {
+                this.plugin.settings[key].vaultHighThreshold = v;
                 await this.plugin.saveSettings();
-              }
-            }));
-            new import_obsidian.Setting(advancedContainer).setName("\u4E0E\u5DF2\u6709\u7B14\u8BB0\u53BB\u91CD\uFF08\u5F85\u786E\u8BA4\uFF09").setDesc('\u76F8\u4F3C\u5EA6\u4F4E\u4E8E\u4E0A\u4E00\u6761\u4F46\u4ECD\u8F83\u9AD8\u65F6\uFF0C\u6807\u8BB0\u4E3A"\u5F85\u786E\u8BA4"\u8BA9\u4F60\u624B\u52A8\u51B3\u5B9A').addText((t) => t.setValue(String(cfg.vaultMidThreshold)).onChange(async (v) => {
-              const n = parseFloat(v);
-              if (!isNaN(n) && n > 0 && n <= 1) {
-                this.plugin.settings[key].vaultMidThreshold = n;
+              })
+            );
+            new import_obsidian.Setting(advancedContainer).setName("\u4E0E\u5DF2\u6709\u7B14\u8BB0\u53BB\u91CD\uFF08\u5F85\u786E\u8BA4\uFF09").setDesc('\u76F8\u4F3C\u5EA6\u4F4E\u4E8E\u4E0A\u4E00\u6761\u4F46\u4ECD\u8F83\u9AD8\u65F6\uFF0C\u6807\u8BB0\u4E3A"\u5F85\u786E\u8BA4"\u8BA9\u4F60\u624B\u52A8\u51B3\u5B9A').addSlider(
+              (s) => s.setLimits(0.3, 0.9, 0.05).setValue(cfg.vaultMidThreshold).setDynamicTooltip().onChange(async (v) => {
+                this.plugin.settings[key].vaultMidThreshold = v;
                 await this.plugin.saveSettings();
-              }
-            }));
-            new import_obsidian.Setting(advancedContainer).setName("\u8D28\u91CF\u8BC4\u5206\u95E8\u69DB").setDesc("AI \u590D\u67E5\u8BC4\u5206\uFF081-5 \u5206\uFF09\u4F4E\u4E8E\u6B64\u503C\u7684\u7B14\u8BB0\u4F1A\u88AB\u4E22\u5F03\u3002\u503C\u8D8A\u4F4E\u4FDD\u7559\u8D8A\u591A").addText((t) => t.setValue(String(cfg.reviewMinScore)).onChange(async (v) => {
-              const n = parseInt(v, 10);
-              if (!isNaN(n) && n >= 1 && n <= 5) {
-                this.plugin.settings[key].reviewMinScore = n;
+              })
+            );
+            new import_obsidian.Setting(advancedContainer).setName("\u8D28\u91CF\u8BC4\u5206\u95E8\u69DB").setDesc("AI \u590D\u67E5\u8BC4\u5206\u4F4E\u4E8E\u6B64\u503C\u7684\u7B14\u8BB0\u4F1A\u88AB\u4E22\u5F03\u3002\u503C\u8D8A\u4F4E\u4FDD\u7559\u8D8A\u591A").addSlider(
+              (s) => s.setLimits(1, 5, 1).setValue(cfg.reviewMinScore).setDynamicTooltip().onChange(async (v) => {
+                this.plugin.settings[key].reviewMinScore = v;
                 await this.plugin.saveSettings();
-              }
-            }));
+              })
+            );
           }
         } else if (!show && advancedContainer) {
           advancedContainer.remove();
@@ -653,6 +653,7 @@ var AtomicNotesSettingTab = class extends import_obsidian.PluginSettingTab {
     }
     try {
       new import_obsidian.Notice("\u6B63\u5728\u6D4B\u8BD5\u8FDE\u63A5...");
+      const startTime = Date.now();
       const response = await (0, import_obsidian.requestUrl)({
         url: deepseekApiUrl,
         method: "POST",
@@ -666,13 +667,26 @@ var AtomicNotesSettingTab = class extends import_obsidian.PluginSettingTab {
           max_tokens: 10
         })
       });
+      const latency = Date.now() - startTime;
       if (response.status === 200) {
-        new import_obsidian.Notice("API \u8FDE\u63A5\u6210\u529F\uFF01");
+        const respModel = response.json?.model || model;
+        const tokensUsed = response.json?.usage?.total_tokens;
+        const tokenInfo = tokensUsed ? ` \xB7 \u6D88\u8017 ${tokensUsed} tokens` : "";
+        new import_obsidian.Notice(`\u2713 \u8FDE\u63A5\u6210\u529F \xB7 \u6A21\u578B: ${respModel} \xB7 \u5EF6\u8FDF: ${latency}ms${tokenInfo}`, 8e3);
       } else {
-        new import_obsidian.Notice(`API \u8FDE\u63A5\u5931\u8D25\uFF1A${response.status}`);
+        new import_obsidian.Notice(`API \u8FDE\u63A5\u5931\u8D25\uFF1AHTTP ${response.status}`, 8e3);
       }
     } catch (error) {
-      new import_obsidian.Notice(`API \u8FDE\u63A5\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      let friendly = msg;
+      if (msg.includes("401") || msg.includes("Unauthorized")) {
+        friendly = "API Key \u65E0\u6548\u6216\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u68C0\u67E5";
+      } else if (msg.includes("429")) {
+        friendly = "\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\u6216\u989D\u5EA6\u4E0D\u8DB3\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5";
+      } else if (msg.includes("Failed to fetch") || msg.includes("network")) {
+        friendly = "\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5 API URL \u6216\u7F51\u7EDC\u8BBE\u7F6E";
+      }
+      new import_obsidian.Notice(`\u2717 \u8FDE\u63A5\u5931\u8D25\uFF1A${friendly}`, 1e4);
     }
   }
 };
@@ -3161,6 +3175,13 @@ var ResultModal = class extends import_obsidian7.Modal {
     this.restoredCrossBatch = /* @__PURE__ */ new Set();
     /** 刷新笔记卡片列表（用于恢复/变更后重新渲染） */
     this.notesListEl = null;
+    this.cardsContainerEl = null;
+    /** 当前筛选状态 */
+    this.filterMode = "all";
+    /** 当前搜索关键词 */
+    this.searchQuery = "";
+    /** 筛选后可见的笔记索引列表 */
+    this.visibleIndices = [];
     this.result = result;
     this.dedupResult = dedupResult;
     this.onSave = onSave || (async () => {
@@ -3417,6 +3438,13 @@ var ResultModal = class extends import_obsidian7.Modal {
     this.notesListEl.detach();
     this.renderNotes(parent);
   }
+  /** 仅刷新卡片区域（搜索/筛选时用，不重建工具栏） */
+  refreshFilteredNotes() {
+    if (!this.cardsContainerEl)
+      return;
+    this.cardsContainerEl.empty();
+    this.renderNoteCardsInto(this.cardsContainerEl);
+  }
   /** 疑似重复确认 UI（中相似度 60-80%） */
   renderPendingDuplicates(container) {
     const pending = this.result.vaultDedupPending;
@@ -3544,6 +3572,32 @@ var ResultModal = class extends import_obsidian7.Modal {
       cls: "atomic-notes-verify-chip unverified"
     });
   }
+  /** 判断笔记是否属于"有问题"（需对比或超源） */
+  noteHasIssues(i) {
+    const note = this.result.notes[i];
+    return (note.needsCompareCount ?? 0) > 0 || (note.outOfScopeCount ?? 0) > 0;
+  }
+  /** 判断笔记是否属于"已溯源"（有溯源且无问题） */
+  noteIsTraced(i) {
+    const note = this.result.notes[i];
+    return (note.tracedCount ?? 0) > 0 && (note.needsCompareCount ?? 0) === 0 && (note.outOfScopeCount ?? 0) === 0;
+  }
+  /** 笔记是否匹配当前筛选条件 */
+  noteMatchesFilter(i) {
+    if (this.filterMode === "issues")
+      return this.noteHasIssues(i);
+    if (this.filterMode === "traced")
+      return this.noteIsTraced(i);
+    return true;
+  }
+  /** 笔记是否匹配搜索关键词 */
+  noteMatchesSearch(i) {
+    if (!this.searchQuery)
+      return true;
+    const note = this.result.notes[i];
+    const q = this.searchQuery.toLowerCase();
+    return (note.title || "").toLowerCase().includes(q) || (note.content || "").toLowerCase().includes(q);
+  }
   /** 卡片式笔记列表 */
   renderNotes(container) {
     const notesEl = container.createEl("div");
@@ -3569,9 +3623,69 @@ var ResultModal = class extends import_obsidian7.Modal {
       }
       this.updateSelectionCount();
     });
+    const toolbar = notesEl.createEl("div", {
+      attr: { style: "display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap" }
+    });
+    const filterGroup = toolbar.createEl("div", {
+      attr: { style: "display:flex;gap:4px" }
+    });
+    const filterBtns = [
+      { mode: "all", label: "\u5168\u90E8" },
+      { mode: "issues", label: "\u6709\u95EE\u9898" },
+      { mode: "traced", label: "\u5DF2\u6EAF\u6E90" }
+    ];
+    const filterBtnEls = {};
+    for (const { mode, label } of filterBtns) {
+      const count = mode === "all" ? this.result.notes.length : mode === "issues" ? this.result.notes.filter((_, i) => this.noteHasIssues(i)).length : this.result.notes.filter((_, i) => this.noteIsTraced(i)).length;
+      const btn = filterGroup.createEl("button", {
+        text: `${label}${count > 0 ? ` (${count})` : ""}`,
+        attr: {
+          style: `font-size:11px;padding:3px 10px;cursor:pointer;border-radius:6px;border:1px solid var(--background-modifier-border);background:${this.filterMode === mode ? "var(--interactive-accent)" : "var(--background-secondary)"};color:${this.filterMode === mode ? "var(--text-on-accent)" : "var(--text-muted)"}`
+        }
+      });
+      btn.addEventListener("click", () => {
+        this.filterMode = mode;
+        for (const [m, b] of Object.entries(filterBtnEls)) {
+          const isActive = m === mode;
+          b.style.background = isActive ? "var(--interactive-accent)" : "var(--background-secondary)";
+          b.style.color = isActive ? "var(--text-on-accent)" : "var(--text-muted)";
+        }
+        this.refreshFilteredNotes();
+      });
+      filterBtnEls[mode] = btn;
+    }
+    const searchInput = toolbar.createEl("input", {
+      attr: {
+        type: "text",
+        placeholder: "\u641C\u7D22\u6807\u9898\u6216\u5185\u5BB9...",
+        style: "flex:1;min-width:120px;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-primary)"
+      }
+    });
+    searchInput.addEventListener("input", () => {
+      this.searchQuery = searchInput.value.trim();
+      this.refreshFilteredNotes();
+    });
+    this.cardsContainerEl = notesEl.createEl("div", { cls: "atomic-notes-cards-container" });
+    this.renderNoteCardsInto(this.cardsContainerEl);
+  }
+  /** 渲染笔记卡片到指定容器（受筛选和搜索控制） */
+  renderNoteCardsInto(container) {
+    this.visibleIndices = [];
     for (let i = 0; i < this.result.notes.length; i++) {
+      if (this.noteMatchesFilter(i) && this.noteMatchesSearch(i)) {
+        this.visibleIndices.push(i);
+      }
+    }
+    if (this.visibleIndices.length === 0) {
+      container.createEl("div", {
+        text: "\u6CA1\u6709\u5339\u914D\u7684\u7B14\u8BB0",
+        attr: { style: "color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center" }
+      });
+      return;
+    }
+    for (const i of this.visibleIndices) {
       const note = this.result.notes[i];
-      const card = notesEl.createEl("div", { cls: "atomic-notes-card" });
+      const card = container.createEl("div", { cls: "atomic-notes-card" });
       const headerRow = card.createEl("div", { cls: "atomic-notes-card-header" });
       const checkbox = headerRow.createEl("input", {
         attr: { type: "checkbox" }
@@ -3868,6 +3982,8 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
     /** 输入面板状态 */
     this._inputElements = null;
     this._inputSubMode = "text";
+    /** 发现面板相似度矩阵缓存 */
+    this._simCache = null;
     this.plugin = plugin;
   }
   getViewType() {
@@ -3961,8 +4077,13 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
     urlInput.style.display = "none";
     const urlMeta = panel.createEl("div", { cls: "atomic-notes-meta-row" });
     urlMeta.style.display = "none";
-    urlMeta.createEl("span");
-    const clearUrlLink = urlMeta.createEl("a", {
+    const urlMetaActions = urlMeta.createEl("div", { attr: { style: "display:flex;gap:8px;align-items:center" } });
+    const pasteUrlBtn = urlMetaActions.createEl("a", {
+      cls: "atomic-notes-clip-btn",
+      text: "\u7C98\u8D34\u526A\u8D34\u677FURL",
+      attr: { href: "#" }
+    });
+    urlMetaActions.createEl("a", {
       cls: "atomic-notes-clear-link",
       text: "\u6E05\u9664",
       attr: { href: "#" }
@@ -4008,6 +4129,21 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
       textarea.value = "";
       charCountEl.setText("0 \u5B57");
     });
+    pasteUrlBtn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      try {
+        const rawText = await navigator.clipboard.readText();
+        if (rawText && rawText.trim()) {
+          urlInput.value = rawText.trim();
+          new import_obsidian9.Notice("\u5DF2\u7C98\u8D34\u526A\u8D34\u677F\u5185\u5BB9");
+        } else {
+          new import_obsidian9.Notice("\u526A\u8D34\u677F\u4E3A\u7A7A");
+        }
+      } catch {
+        new import_obsidian9.Notice("\u65E0\u6CD5\u8BFB\u53D6\u526A\u8D34\u677F\uFF0C\u8BF7\u68C0\u67E5\u6743\u9650");
+      }
+    });
+    const clearUrlLink = urlMetaActions.querySelector(".atomic-notes-clear-link");
     clearUrlLink.addEventListener("click", (ev) => {
       ev.preventDefault();
       urlInput.value = "";
@@ -4036,10 +4172,38 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
       attr: { style: "padding:2px 10px;font-size:11px;cursor:pointer;background:var(--background-modifier-error);color:var(--text-on-accent);border:none;border-radius:4px" }
     });
     clearBtn.addEventListener("click", async () => {
-      this.plugin.settings.extractionHistory = [];
-      await this.plugin.saveSettings();
-      new import_obsidian9.Notice("\u5386\u53F2\u8BB0\u5F55\u5DF2\u6E05\u7A7A");
-      this.renderHistoryPanel(el);
+      const confirmModal = new class extends import_obsidian9.Modal {
+        constructor(app, parent, targetEl) {
+          super(app);
+          this.parent = parent;
+          this.targetEl = targetEl;
+        }
+        onOpen() {
+          this.contentEl.empty();
+          this.contentEl.createEl("h3", { text: "\u786E\u8BA4\u6E05\u7A7A\u5168\u90E8\u5386\u53F2\u8BB0\u5F55\uFF1F" });
+          this.contentEl.createEl("p", {
+            text: `\u8FD9\u5C06\u5220\u9664\u5168\u90E8 ${history.length} \u6761\u63D0\u70BC\u5386\u53F2\uFF0C\u5DF2\u4FDD\u5B58\u7684\u7B14\u8BB0\u4E0D\u4F1A\u53D7\u5F71\u54CD\u3002`,
+            attr: { style: "font-size:13px;color:var(--text-muted);margin:8px 0" }
+          });
+          const btnRow = this.contentEl.createEl("div", { attr: { style: "display:flex;gap:10px;justify-content:flex-end;margin-top:16px" } });
+          btnRow.createEl("button", { text: "\u53D6\u6D88" }).addEventListener("click", () => this.close());
+          const confirmBtn = btnRow.createEl("button", {
+            text: "\u786E\u8BA4\u6E05\u7A7A",
+            attr: { style: "background:var(--background-modifier-error);color:var(--text-on-accent);border:none;padding:6px 16px;border-radius:6px;cursor:pointer" }
+          });
+          confirmBtn.addEventListener("click", async () => {
+            this.parent.plugin.settings.extractionHistory = [];
+            await this.parent.plugin.saveSettings();
+            new import_obsidian9.Notice("\u5386\u53F2\u8BB0\u5F55\u5DF2\u6E05\u7A7A");
+            this.close();
+            this.parent.renderHistoryPanel(this.targetEl);
+          });
+        }
+        onClose() {
+          this.contentEl.empty();
+        }
+      }(this.app, this, el);
+      confirmModal.open();
     });
     const listEl = el.createEl("div");
     const total = history.length;
@@ -4064,7 +4228,21 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
         text: "\xD7",
         attr: { style: "font-size:16px;color:var(--text-muted);cursor:pointer;padding:0 4px;line-height:1" }
       });
+      let delConfirming = false;
       delBtn.addEventListener("click", async () => {
+        if (!delConfirming) {
+          delConfirming = true;
+          delBtn.setText("\u786E\u8BA4?");
+          delBtn.style.color = "var(--color-red)";
+          setTimeout(() => {
+            if (delConfirming) {
+              delConfirming = false;
+              delBtn.setText("\xD7");
+              delBtn.style.color = "var(--text-muted)";
+            }
+          }, 3e3);
+          return;
+        }
         this.plugin.settings.extractionHistory.splice(idx, 1);
         await this.plugin.saveSettings();
         this.renderHistoryPanel(el);
@@ -4302,7 +4480,18 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
           new import_obsidian9.Notice("\u8BF7\u8F93\u5165\u6709\u6548\u7684 URL");
           return;
         }
-        inputData = { type: "url", content: inputContent.trim() };
+        const url = inputContent.trim();
+        try {
+          const parsed = new URL(url);
+          if (!["http:", "https:"].includes(parsed.protocol)) {
+            new import_obsidian9.Notice("URL \u5FC5\u987B\u4EE5 http:// \u6216 https:// \u5F00\u5934");
+            return;
+          }
+        } catch {
+          new import_obsidian9.Notice("URL \u683C\u5F0F\u4E0D\u6B63\u786E\uFF0C\u8BF7\u68C0\u67E5");
+          return;
+        }
+        inputData = { type: "url", content: url };
       } else {
         inputContent = elements.textarea.value;
         if (!inputContent || !inputContent.trim()) {
@@ -4431,7 +4620,19 @@ var AtomicNotesPanel = class extends import_obsidian9.ItemView {
         attr: { style: "color:var(--text-muted);font-size:12px" }
       });
       try {
-        const { notes, matrix } = await buildSimilarityMatrix(app.vault, settings.targetFolder);
+        const currentFolder = settings.targetFolder || "";
+        const currentCount = files.length;
+        if (!this._simCache || this._simCache.folder !== currentFolder || this._simCache.noteCount !== currentCount) {
+          const built = await buildSimilarityMatrix(app.vault, settings.targetFolder);
+          this._simCache = {
+            folder: currentFolder,
+            noteCount: built.notes.length,
+            notes: built.notes,
+            matrix: built.matrix
+          };
+        }
+        const notes = this._simCache.notes;
+        const matrix = this._simCache.matrix;
         const idx = notes.findIndex((n) => n.path === selectedPath);
         if (idx < 0) {
           resultsContainer.empty();
@@ -4591,7 +4792,15 @@ var AtomicNotesPlugin = class extends import_obsidian10.Plugin {
       callback: () => this.openPanelAt("split")
     });
     this.addRibbonIcon("atom", "\u63D0\u70BC\u539F\u5B50\u7B14\u8BB0", () => {
-      this.extractFromSelection();
+      const activeView = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+      if (activeView) {
+        const selection = activeView.editor.getSelection();
+        if (selection && selection.trim().length > 0) {
+          this.extractFromSelection();
+          return;
+        }
+      }
+      this.activateView();
     });
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor, view) => {
@@ -4705,18 +4914,19 @@ var AtomicNotesPlugin = class extends import_obsidian10.Plugin {
       new import_obsidian10.Notice("\u5DF2\u6709\u63D0\u53D6\u4EFB\u52A1\u5728\u8FDB\u884C\u4E2D\uFF0C\u8BF7\u7B49\u5F85\u5B8C\u6210\u540E\u518D\u8BD5");
       return;
     }
+    if (!opts.skipDuplicateCheck) {
+      const sourceHash = computeSourceHash(input.content);
+      const previous = findPreviousExtraction(this.settings.extractionHistory || [], sourceHash);
+      if (previous) {
+        this.showDuplicateConfirm(input, previous, opts);
+        return;
+      }
+    }
     this._isExtracting = true;
     if (!this.settings.deepseekApiKey) {
       new import_obsidian10.Notice("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u586B\u5199 DeepSeek API Key");
       this._isExtracting = false;
       return;
-    }
-    const sourceHash = computeSourceHash(input.content);
-    const previous = findPreviousExtraction(this.settings.extractionHistory || [], sourceHash);
-    if (previous) {
-      const daysAgo = Math.floor((Date.now() - new Date(previous.extractedAt).getTime()) / (1e3 * 60 * 60 * 24));
-      const timeStr = daysAgo === 0 ? "\u4ECA\u5929" : `${daysAgo}\u5929\u524D`;
-      new import_obsidian10.Notice(`\u6B64\u5185\u5BB9\u5DF2\u5728${timeStr}\u63D0\u70BC\u8FC7\uFF08${previous.noteCount}\u6761\u7B14\u8BB0\uFF09\uFF0C\u5982\u9700\u91CD\u65B0\u63D0\u70BC\u8BF7\u7EE7\u7EED\u7B49\u5F85`);
     }
     this._abortController = new AbortController();
     let progressModal = null;
@@ -4725,6 +4935,8 @@ var AtomicNotesPlugin = class extends import_obsidian10.Plugin {
       const m = new class extends import_obsidian10.Modal {
         constructor(p) {
           super(p.app);
+          this._cancelBtn = null;
+          this._plugin = p;
         }
         onOpen() {
           this.containerEl.style.zIndex = "1000";
@@ -4732,6 +4944,15 @@ var AtomicNotesPlugin = class extends import_obsidian10.Plugin {
           this.modalEl.style.maxWidth = "420px";
           this._title = this.contentEl.createEl("div", { attr: { style: "font-weight:bold;font-size:13px;margin-bottom:8px" }, text: "\u6B63\u5728\u63D0\u70BC\u539F\u5B50\u7B14\u8BB0..." });
           this._body = this.contentEl.createEl("div", { attr: { style: "font-size:12px;color:var(--text-muted);line-height:1.6;max-height:200px;overflow-y:auto" } });
+          const btnRow = this.contentEl.createEl("div", { attr: { style: "display:flex;justify-content:flex-end;margin-top:12px" } });
+          this._cancelBtn = btnRow.createEl("button", { text: "\u53D6\u6D88\u63D0\u70BC", attr: { style: "font-size:12px;padding:4px 16px;cursor:pointer" } });
+          this._cancelBtn.addEventListener("click", () => {
+            this._plugin.cancelExtraction();
+            if (this._cancelBtn) {
+              this._cancelBtn.disabled = true;
+              this._cancelBtn.setText("\u53D6\u6D88\u4E2D...");
+            }
+          });
         }
         update(event, allEvents, totalMs) {
           this._title.setText(`${event.phase}\uFF1A${event.name} \u2014 \u5DF2\u7528\u65F6 ${(totalMs / 1e3).toFixed(1)}s`);
@@ -4909,6 +5130,63 @@ var AtomicNotesPlugin = class extends import_obsidian10.Plugin {
         this.contentEl.empty();
       }
     }(this, input, gateError);
+    modal.open();
+  }
+  /**
+   * 重复提炼确认框
+   */
+  showDuplicateConfirm(input, previous, opts) {
+    const daysAgo = Math.floor((Date.now() - new Date(previous.extractedAt).getTime()) / (1e3 * 60 * 60 * 24));
+    const timeStr = daysAgo === 0 ? "\u4ECA\u5929" : `${daysAgo}\u5929\u524D`;
+    const modal = new class extends import_obsidian10.Modal {
+      constructor(plugin) {
+        super(plugin.app);
+        this.plugin = plugin;
+      }
+      onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.createEl("h3", { text: "\u26A0\uFE0F \u6B64\u5185\u5BB9\u5DF2\u63D0\u70BC\u8FC7" });
+        const infoBox = contentEl.createEl("div", {
+          attr: {
+            style: [
+              "background:var(--background-secondary)",
+              "border-left:3px solid var(--color-orange)",
+              "border-radius:6px",
+              "padding:8px 12px",
+              "margin:10px 0",
+              "font-size:13px",
+              "color:var(--text-muted)"
+            ].join(";")
+          }
+        });
+        infoBox.setText(`\u6B64\u5185\u5BB9\u5DF2\u5728${timeStr}\u63D0\u70BC\u8FC7\uFF0C\u5171 ${previous.noteCount} \u6761\u7B14\u8BB0\u3002`);
+        const btnRow = contentEl.createEl("div", {
+          attr: { style: "display:flex;gap:10px;justify-content:flex-end;margin-top:16px" }
+        });
+        const cancelBtn = btnRow.createEl("button", { text: "\u53D6\u6D88" });
+        cancelBtn.addEventListener("click", () => this.close());
+        if (previous.savedPaths && previous.savedPaths.length > 0) {
+          const viewBtn = btnRow.createEl("button", { text: "\u67E5\u770B\u4E0A\u6B21\u7ED3\u679C" });
+          viewBtn.addEventListener("click", () => {
+            this.close();
+            const firstPath = previous.savedPaths[0];
+            this.plugin.app.workspace.openLinkText(firstPath, "", false);
+          });
+        }
+        const reExtractBtn = btnRow.createEl("button", {
+          text: "\u91CD\u65B0\u63D0\u70BC",
+          attr: { style: "background:var(--interactive-accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600" }
+        });
+        reExtractBtn.addEventListener("click", async () => {
+          this.close();
+          await this.plugin.runExtraction(input, { ...opts, skipDuplicateCheck: true });
+        });
+      }
+      onClose() {
+        this.contentEl.empty();
+      }
+    }(this);
     modal.open();
   }
   async saveAndBacklink(input, notes) {
