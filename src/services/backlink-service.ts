@@ -27,7 +27,8 @@ export function insertBacklinks(
       const newOffset = editor.posToOffset(cursorPos) + backlink.length;
       editor.setCursor(editor.offsetToPos(newOffset));
       success++;
-    } catch {
+    } catch (e) {
+      console.error(`[Bamboo Darts] 插入反向链接失败: ${path}`, e);
       failed++;
     }
   }

@@ -12,6 +12,7 @@ import { saveNotes } from './storage';
 import { AtomicNote } from './utils/notes-standards';
 import { ResultModal } from './ui/result-modal';
 import { InputModal } from './ui/input-modal';
+import { ForceExtractModal, DuplicateConfirmModal, ErrorModal } from './ui/aux-modals';
 import { AtomicNotesPanel, VIEW_TYPE_ATOMIC_PANEL } from './ui/panel-view';
 import { computeSourceHash, getSourceTitle, addHistoryEntry, findPreviousExtraction } from './services/history-service';
 import { insertBacklinks } from './services/backlink-service';
@@ -29,21 +30,8 @@ function friendlyError(error: unknown): string {
   return raw;
 }
 
+
 // ─── 共享样式常量 ───
-
-const MSG_BOX_STYLE = [
-  'background:var(--background-secondary)',
-  'border-left:3px solid var(--color-orange)',
-  'border-radius:6px',
-  'padding:8px 12px',
-  'margin:10px 0',
-  'font-size:13px',
-  'color:var(--text-muted)',
-].join(';');
-
-const BTN_ROW_STYLE = 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px';
-
-const ACTION_BTN_STYLE = 'background:var(--interactive-accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600';
 
 export default class AtomicNotesPlugin extends Plugin {
   settings: PluginSettings;
@@ -419,36 +407,7 @@ export default class AtomicNotesPlugin extends Plugin {
     input: { type: 'url' | 'text' | 'selection'; content: string },
     gateError: string
   ) {
-    const plugin = this;
-    const modal = new (class extends Modal {
-      constructor(app: App) { super(app); }
-      onOpen() {
-        const { contentEl } = this;
-        contentEl.empty();
-        contentEl.createEl('h3', { text: '⚠️ 内容质量门控未通过' });
-        contentEl.createEl('div', { attr: { style: MSG_BOX_STYLE }, text: gateError });
-        contentEl.createEl('p', {
-          text: '强制提炼将跳过质量检查，直接发送给 AI。低质内容可能导致提炼结果较差。',
-          attr: { style: 'font-size:13px;color:var(--text-muted);margin:8px 0' },
-        });
-        contentEl.createEl('p', {
-          text: '提示：可以选取更长的段落，或在设置中手动指定内容策略',
-          attr: { style: 'font-size:12px;color:var(--text-faint);margin:4px 0 8px' },
-        });
-        const btnRow = contentEl.createEl('div', { attr: { style: BTN_ROW_STYLE } });
-        btnRow.createEl('button', { text: '放弃' }).addEventListener('click', () => this.close());
-        const forceBtn = btnRow.createEl('button', {
-          text: '强制提炼',
-          attr: { style: 'background:var(--color-orange);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600' },
-        });
-        forceBtn.addEventListener('click', async () => {
-          this.close();
-          await plugin.runExtraction(input, { skipGate: true });
-        });
-      }
-      onClose() { this.contentEl.empty(); }
-    })(this.app);
-    modal.open();
+    new ForceExtractModal(this.app, this, input, gateError).open();
   }
 
   /**
@@ -459,39 +418,7 @@ export default class AtomicNotesPlugin extends Plugin {
     previous: { extractedAt: string; noteCount: number; savedPaths?: string[] },
     opts: { onProgress?: ProgressCallback; skipGate?: boolean }
   ) {
-    const daysAgo = Math.floor((Date.now() - new Date(previous.extractedAt).getTime()) / (1000 * 60 * 60 * 24));
-    const timeStr = daysAgo === 0 ? '今天' : `${daysAgo}天前`;
-    const plugin = this;
-
-    const modal = new (class extends Modal {
-      constructor(app: App) { super(app); }
-      onOpen() {
-        const { contentEl } = this;
-        contentEl.empty();
-        contentEl.createEl('h3', { text: '⚠️ 此内容已提炼过' });
-        contentEl.createEl('div', {
-          attr: { style: MSG_BOX_STYLE },
-          text: `此内容已在${timeStr}提炼过，共 ${previous.noteCount} 条笔记。`,
-        });
-        const btnRow = contentEl.createEl('div', { attr: { style: BTN_ROW_STYLE } });
-        btnRow.createEl('button', { text: '取消' }).addEventListener('click', () => this.close());
-
-        if (previous.savedPaths && previous.savedPaths.length > 0) {
-          btnRow.createEl('button', { text: '查看上次结果' }).addEventListener('click', () => {
-            this.close();
-            plugin.app.workspace.openLinkText(previous.savedPaths![0], '', false);
-          });
-        }
-
-        const reExtractBtn = btnRow.createEl('button', { text: '重新提炼', attr: { style: ACTION_BTN_STYLE } });
-        reExtractBtn.addEventListener('click', async () => {
-          this.close();
-          await plugin.runExtraction(input, { ...opts, skipDuplicateCheck: true });
-        });
-      }
-      onClose() { this.contentEl.empty(); }
-    })(this.app);
-    modal.open();
+    new DuplicateConfirmModal(this.app, this, input, previous, opts).open();
   }
 
   /**
@@ -503,28 +430,7 @@ export default class AtomicNotesPlugin extends Plugin {
     opts: { onProgress?: ProgressCallback; skipGate?: boolean; skipDuplicateCheck?: boolean },
     retryable: boolean
   ) {
-    const plugin = this;
-    const ERROR_BOX_STYLE = MSG_BOX_STYLE.replace('var(--color-orange)', 'var(--color-red)') + ';word-break:break-word';
-    const modal = new (class extends Modal {
-      constructor(app: App) { super(app); }
-      onOpen() {
-        const { contentEl } = this;
-        contentEl.empty();
-        contentEl.createEl('h3', { text: '✗ 提炼失败' });
-        contentEl.createEl('div', { attr: { style: ERROR_BOX_STYLE }, text: errorMsg });
-        const btnRow = contentEl.createEl('div', { attr: { style: BTN_ROW_STYLE } });
-        btnRow.createEl('button', { text: '关闭' }).addEventListener('click', () => this.close());
-        if (retryable) {
-          const retryBtn = btnRow.createEl('button', { text: '重试', attr: { style: ACTION_BTN_STYLE } });
-          retryBtn.addEventListener('click', async () => {
-            this.close();
-            await plugin.runExtraction(input, { skipDuplicateCheck: true, skipGate: opts.skipGate });
-          });
-        }
-      }
-      onClose() { this.contentEl.empty(); }
-    })(this.app);
-    modal.open();
+    new ErrorModal(this.app, this, input, errorMsg, opts, retryable).open();
   }
 
   private async saveAndBacklink(input: { type: 'url' | 'text' | 'selection'; content: string }, notes: AtomicNote[]) {

@@ -1,15 +1,35 @@
 /**
- * 共享 Tokenizer（中文 n-gram + 英文完整词）
+ * 共享 Tokenizer（中文 n-gram + 分词 + 英文完整词）
  *
- * 服务于去重（3-gram）和关键词提取（2-gram）两个场景。
+ * 服务于去重（多粒度）和关键词提取两个场景。
  * 通过 ngramSize 参数控制中文分片粒度。
  */
 
-import { STOP_WORDS } from '../constants';
+import { STOP_WORDS, CN_WORD_DICT } from '../constants';
 
 export interface TokenizeOptions {
   /** 中文 n-gram 大小，默认 3（去重场景）；关键词提取可设为 2 */
   ngramSize?: number;
+}
+
+/** 正向最大匹配中文分词 */
+function forwardMaxMatch(text: string): string[] {
+  const words: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    let matched = text[i]; // fallback: 单字
+    let maxLen = Math.min(5, text.length - i);
+    for (let len = maxLen; len >= 2; len--) {
+      const candidate = text.slice(i, i + len);
+      if (CN_WORD_DICT.has(candidate)) {
+        matched = candidate;
+        break;
+      }
+    }
+    words.push(matched);
+    i += matched.length;
+  }
+  return words;
 }
 
 /**
@@ -33,6 +53,14 @@ export function tokenize(text: string, options?: TokenizeOptions): Map<string, n
 
   for (const chunk of chunks) {
     if (/[\u4e00-\u9fff]/.test(chunk)) {
+      // 中文分词（补充词汇级 token）
+      const words = forwardMaxMatch(chunk);
+      for (const word of words) {
+        if (word.length >= 2 && !STOP_WORDS.has(word)) {
+          tokens.set(`W:${word}`, (tokens.get(`W:${word}`) || 0) + 1);
+        }
+      }
+
       // 中文：字符 n-gram（长度不足 n 则退化为更小的 gram）
       if (chunk.length >= ngramSize) {
         for (let i = 0; i <= chunk.length - ngramSize; i++) {
@@ -42,7 +70,7 @@ export function tokenize(text: string, options?: TokenizeOptions): Map<string, n
           }
         }
       } else if (chunk.length >= 2) {
-        // 短中文：退回 2-gram
+        // 短中文：2-gram + 分词
         for (let i = 0; i <= chunk.length - 2; i++) {
           const gram = chunk.slice(i, i + 2);
           if (!STOP_WORDS.has(gram)) {

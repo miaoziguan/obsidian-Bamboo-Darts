@@ -71,7 +71,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   settingsVersion: 2,
   deepseekApiKey: '',
   deepseekApiUrl: 'https://api.deepseek.com/v1/chat/completions',
-  model: 'deepseek-chat',
+  model: 'deepseek-v4-flash',
   maxTokens: 6000,
   targetFolder: '原子笔记',
   dedupTargetFolder: '',
@@ -137,7 +137,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('API Key')
-      .setDesc('你的 API Key（必需）。还没有？前往 platform.deepseek.com 注册获取')
+      .setDesc('你的 API Key（必需）')
       .addText(text => {
         text
           .setPlaceholder('sk-...')
@@ -147,7 +147,14 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
         text.inputEl.type = 'password';
-      });
+      })
+      .addButton(btn =>
+        btn.setButtonText('获取 Key')
+          .setTooltip('前往 DeepSeek 官网注册并获取 API Key')
+          .onClick(() => {
+            window.open('https://platform.deepseek.com/api_keys', '_blank');
+          })
+      );
 
     new Setting(containerEl)
       .setName('API URL')
@@ -158,6 +165,13 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           .onChange(async value => {
             this.plugin.settings.deepseekApiUrl = value.trim();
             await this.plugin.saveSettings();
+          })
+      )
+      .addButton(btn =>
+        btn.setButtonText('获取 Key')
+          .setTooltip('前往 DeepSeek 官网注册并获取 API Key')
+          .onClick(() => {
+            window.open('https://platform.deepseek.com/api_keys', '_blank');
           })
       );
 
@@ -333,7 +347,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('仅保存可溯源笔记')
-      .setDesc('开启时自动过滤包含超源声明的笔记')
+      .setDesc('开启时自动过滤包含超源声明的笔记（需先启用上方「启用内容核查」）')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.verifiedOnly)

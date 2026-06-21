@@ -1,5 +1,4 @@
 import { runGateChecks } from '../src/gate';
-import { checkDuplicate } from '../src/gate/duplicate';
 import { ProfileConfig, PROFILE_CONFIGS } from '../src/extraction/profiles';
 
 describe('gate-rules', () => {
@@ -71,16 +70,6 @@ describe('gate-rules', () => {
       const result = runGateChecks(content);
       expect(result.passed).toBe(false);
       expect(result.reasons).toContainEqual(expect.stringContaining('噪声占比'));
-    });
-
-    it('should block for duplicate content (via checkDuplicate)', () => {
-      const content = '这是一段足够长的测试内容用于测试重复检测功能是否正常工作确保长度超过五十字符并且内容足够丰富才能触发重复检测规则。';
-      const processed = ['这是一段足够长的测试内容用于测试重复检测功能是否正常工作确保长度超过五十字符并且内容足够丰富才能触发重复检测规则。'];
-      const result = checkDuplicate(content, processed);
-      expect(result.status).toBe('block');
-      if (result.status === 'block') {
-        expect(result.reason).toContain('高度相似');
-      }
     });
 
     it('should not block for different content', () => {

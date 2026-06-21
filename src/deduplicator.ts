@@ -20,13 +20,15 @@ import { AtomicNote } from './utils/notes-standards';
 import {
   DEDUP_BATCH_SIZE, DEDUP_CACHE_TTL,
   MIN_TOKENS_THRESHOLD, CROSS_BATCH_THRESHOLD, IDF_SMOOTH,
-  LENGTH_RATIO_THRESHOLD, TITLE_WEIGHT, CONTENT_WEIGHT, SHORT_NOTE_LENGTH, SHORT_NOTE_BOOST_FACTOR,
+  LENGTH_RATIO_THRESHOLD, SHORT_NOTE_LENGTH, SHORT_NOTE_BOOST_FACTOR,
+  BM25_K1, BM25_B, SIMHASH_HAMMING_THRESHOLD,
 } from './constants';
+import { simhash, hammingDistance } from './utils/simhash';
 
 // ─── Token 化 ───
 
 import { tokenize } from './utils/tokenizer';
-// 重导出供外部直接使用（如测试）
+// 重导出供测试使用
 export { tokenize };
 
 // ─── TF-IDF 核心 ───
@@ -79,14 +81,26 @@ interface TfIdfVector {
   weights: Map<string, number>;  // token → tf-idf 权重
   norm: number;                   // L2 范数
   tokenCount: number;             // 原始 token 数（用于最小门槛判断）
+  /** 提取权重最高的 topN 个 token（用于 Jaccard 关键词比对） */
+  topTokens: string[];
 }
 
-function computeTfIdfVector(tokens: Map<string, number>, idfTable: IdfTable): TfIdfVector {
+function computeTfIdfVector(
+  tokens: Map<string, number>,
+  idfTable: IdfTable,
+  docLen: number = 0,
+  avgDocLen: number = 0,
+): TfIdfVector {
   const weights = new Map<string, number>();
   let sumSq = 0;
+  const k1 = BM25_K1;
+  const b = BM25_B;
+  // BM25 长度归一化系数（avgDocLen=0 时退化为标准 TF）
+  const lenNorm = avgDocLen > 0 ? (1 - b + b * docLen / avgDocLen) : 1;
 
   for (const [token, freq] of tokens) {
-    const tf = freq; // 使用频次而非归一化比例（与 idf 配合效果一致，避免短文档被过度放大）
+    // BM25 饱和词频
+    const tf = freq / (freq + k1 * lenNorm);
     const idf = idfTable.idf.get(token) || Math.log((idfTable.docCount + IDF_SMOOTH) / (0 + IDF_SMOOTH)) + 1;
     const weight = tf * idf;
     weights.set(token, weight);
@@ -97,6 +111,11 @@ function computeTfIdfVector(tokens: Map<string, number>, idfTable: IdfTable): Tf
     weights,
     norm: Math.sqrt(sumSq),
     tokenCount: tokens.size,
+    // 取权重最高的 5 个 token 作为关键词指纹
+    topTokens: [...weights.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([k]) => k),
   };
 }
 
@@ -165,6 +184,7 @@ interface CachedNote {
   titleTokens: Map<string, number>;     // 标题 token → 频次（可选）
   vector: TfIdfVector;                  // 基于知识库语料的 tf-idf 向量
   titleVector: TfIdfVector | null;      // 标题向量
+  simhashFp: bigint;                    // SimHash 64-bit 指纹
   mtime: number;
 }
 
@@ -220,6 +240,38 @@ function isPathInFolder(filePath: string, targetFolder: string): boolean {
   return false;
 }
 
+// ─── 辅助函数 ───
+
+/** Jaccard 系数：两集合交集大小 / 并集大小 */
+function jaccardSimilarity(a: Set<string> | string[], b: Set<string> | string[]): number {
+  const setA = a instanceof Set ? a : new Set(a);
+  const setB = b instanceof Set ? b : new Set(b);
+  if (setA.size === 0 && setB.size === 0) return 0;
+  let intersection = 0;
+  for (const item of setA) {
+    if (setB.has(item)) intersection++;
+  }
+  return intersection / (setA.size + setB.size - intersection);
+}
+
+/** 字符级编辑距离（Levenshtein），归一化为相似度 */
+function editSimilarity(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (m === 0 || n === 0) return 0;
+  const prev = new Uint16Array(n + 1);
+  const curr = new Uint16Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= n; j++) prev[j] = curr[j];
+  }
+  return 1 - curr[n] / Math.max(m, n);
+}
+
 // ─── Phase 5: 同批交叉去重 ───
 
 /**
@@ -237,21 +289,24 @@ export function crossCheckBatch(notes: AtomicNote[], threshold?: number): DedupR
 
   // 2. 以当前 batch 为语料计算 IDF（小语料，但足以区分相对重要性）
   const idfTable = computeIdfTable(docTokens);
+  const avgLen = notes.reduce((s, n) => s + n.content.length, 0) / Math.max(notes.length, 1);
 
   // 3. 预计算所有笔记的 TF-IDF 向量
-  const vectors = docTokens.map(tokens => computeTfIdfVector(tokens, idfTable));
+  const vectors = docTokens.map((tokens, i) => computeTfIdfVector(tokens, idfTable, notes[i].content.length, avgLen));
 
   // 4. 交叉比对
   for (let i = 0; i < notes.length; i++) {
     const note = notes[i];
     const vec = vectors[i];
-    const length = note.content.length;
+      const length = note.content.length;
     let isDuplicate = false;
     let bestMatch: DuplicateInfo | null = null;
+    const isShortNote = length < SHORT_NOTE_LENGTH;
 
     for (let j = 0; j < uniqueIndices.length; j++) {
       const uniqueIdx = uniqueIndices[j];
       const uniqueVec = vectors[uniqueIdx];
+      const uniqueNote = uniqueNotes[j];
 
       // 长度预过滤
       const otherLen = notes[uniqueIdx].content.length;
@@ -259,14 +314,32 @@ export function crossCheckBatch(notes: AtomicNote[], threshold?: number): DedupR
         continue;
       }
 
-      const similarity = cosineSimilarity(vec, uniqueVec);
+      // 关键词预过滤：Top-5 零交集 → 跳过余弦
+      const keywordOverlap = jaccardSimilarity(vec.topTokens, uniqueVec.topTokens);
+      if (keywordOverlap === 0 && Math.min(length, otherLen) > 30) continue;
+
+      // 极短笔记：编辑距离兜底
+      let similarity: number;
+      if (isShortNote && otherLen < SHORT_NOTE_LENGTH) {
+        similarity = editSimilarity(note.content, notes[uniqueIdx].content);
+        if (similarity < 0.7) continue;
+      } else {
+        const cosSim = cosineSimilarity(vec, uniqueVec);
+        const titleSim = jaccardSimilarity(
+          tokenize(note.title, { ngramSize: 2 }),
+          tokenize(uniqueNote.title, { ngramSize: 2 }),
+        );
+        // 综合评分
+        similarity = cosSim * 0.5 + keywordOverlap * 0.3 + titleSim * 0.2;
+      }
+
       if (similarity > effectiveThreshold) {
         isDuplicate = true;
         bestMatch = {
           isDuplicate: true,
           similarity,
-          matchedNote: `同批笔记 #${j + 1}: ${uniqueNotes[j].title}`,
-          matchedContent: uniqueNotes[j].content.slice(0, 200),
+          matchedNote: `同批笔记 #${j + 1}: ${uniqueNote.title}`,
+          matchedContent: uniqueNote.content.slice(0, 200),
           removedTitle: note.title,
           removedContent: note.content,
         };
@@ -329,14 +402,15 @@ async function loadAndPreprocessExistingNotes(
 
   // 计算 IDF（基于整个目标文件夹的语料）
   const idfTable = computeIdfTable(allTokens, allTokens.length || 1);
+  const avgLen = rawNotes.reduce((s, rn) => s + rn.content.length, 0) / Math.max(rawNotes.length, 1);
 
   // 计算每篇文档的 TF-IDF 向量
   const notes: CachedNote[] = rawNotes.map((rn, idx) => {
     const tokens = allTokens[idx];
-    const vector = computeTfIdfVector(tokens, idfTable);
+    const vector = computeTfIdfVector(tokens, idfTable, rn.content.length, avgLen);
     const titleTokens = tokenize(rn.title);
     const titleVector = titleTokens.size >= MIN_TOKENS_THRESHOLD
-      ? computeTfIdfVector(titleTokens, idfTable)
+      ? computeTfIdfVector(titleTokens, idfTable, rn.title.length, avgLen)
       : null;
     return {
       path: rn.path,
@@ -345,6 +419,7 @@ async function loadAndPreprocessExistingNotes(
       titleTokens,
       vector,
       titleVector,
+      simhashFp: simhash(vector.weights),
       mtime: rn.mtime,
     };
   });
@@ -381,30 +456,43 @@ export async function checkAgainstVaultDetailed(
     cacheManager.set(targetFolder, existingNotes, idfTable);
   }
 
+  // 计算整体平均文档长度（BM25 用）
+  const vaultTotalLen = existingNotes.reduce((s, n) => s + n.content.length, 0);
+  const newTotalLen = notes.reduce((s, n) => s + n.content.length, 0);
+  const avgDocLen = (vaultTotalLen + newTotalLen) /
+    Math.max(existingNotes.length + notes.length, 1);
+
   // 新笔记预处理
-  const newNoteVectors: Array<{ vec: TfIdfVector; titleVec: TfIdfVector | null; length: number }> = [];
+  const newNoteVectors: Array<{ vec: TfIdfVector; titleVec: TfIdfVector | null; length: number; simhashFp: bigint; topTokens: string[] }> = [];
   for (const note of notes) {
     const contentTokens = tokenize(note.content);
     const titleTokens = tokenize(note.title);
-    const vec = computeTfIdfVector(contentTokens, idfTable);
+    const vec = computeTfIdfVector(contentTokens, idfTable, note.content.length, avgDocLen);
     const titleVec = titleTokens.size >= MIN_TOKENS_THRESHOLD
-      ? computeTfIdfVector(titleTokens, idfTable)
+      ? computeTfIdfVector(titleTokens, idfTable, note.title.length, avgDocLen)
       : null;
-    newNoteVectors.push({ vec, titleVec, length: note.content.length });
+    newNoteVectors.push({ vec, titleVec, length: note.content.length, simhashFp: simhash(vec.weights), topTokens: vec.topTokens });
   }
 
   const results: VaultMatchInfo[] = [];
 
   for (let idx = 0; idx < notes.length; idx++) {
     const note = notes[idx];
-    const { vec: contentVec, titleVec: newTitleVec, length } = newNoteVectors[idx];
+    const { vec: contentVec, titleVec: newTitleVec, length, simhashFp, topTokens } = newNoteVectors[idx];
     let bestMatch: VaultMatchInfo['bestMatch'] = null;
 
+    // SimHash 预过滤：只比对汉明距离 < 3 的候选
     for (const existing of existingNotes) {
+      if (hammingDistance(simhashFp, existing.simhashFp) >= SIMHASH_HAMMING_THRESHOLD) continue;
+
       // 长度预过滤
       if (Math.abs(length - existing.content.length) / Math.max(length, existing.content.length) > LENGTH_RATIO_THRESHOLD) {
         continue;
       }
+
+      // 关键词预过滤
+      const keywordOverlap = jaccardSimilarity(topTokens, existing.vector.topTokens);
+      if (keywordOverlap === 0 && Math.min(length, existing.content.length) > 30) continue;
 
       // 内容相似度
       const contentSim = cosineSimilarity(contentVec, existing.vector);
@@ -417,10 +505,10 @@ export async function checkAgainstVaultDetailed(
         hasTitleMatch = true;
       }
 
-      // 综合相似度：有标题匹配则加权，否则退化为纯内容
+      // 综合评分
       const combinedSim = hasTitleMatch
-        ? titleSim * TITLE_WEIGHT + contentSim * CONTENT_WEIGHT
-        : contentSim;
+        ? contentSim * 0.5 + keywordOverlap * 0.3 + titleSim * 0.2
+        : contentSim * 0.6 + keywordOverlap * 0.4;
 
       if (!bestMatch || combinedSim > bestMatch.similarity) {
         bestMatch = {

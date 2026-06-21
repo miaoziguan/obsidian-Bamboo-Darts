@@ -845,7 +845,7 @@ export class ResultModal extends Modal {
         });
         verifyHeader.createEl('span', {
           text: '核查详情',
-          attr: { style: 'font-size:11px;color:var(--text-muted);font-weight:500' },
+          attr: { style: 'font-size:11px;color:var(--text-accent);font-weight:600' },
         });
 
         const verifyBody = verifySection.createEl('div', {

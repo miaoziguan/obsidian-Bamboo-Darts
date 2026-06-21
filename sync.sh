@@ -77,7 +77,7 @@ else
     --external:@codemirror/state --external:@codemirror/stream-parser \
     --external:@codemirror/text --external:@codemirror/tooltip \
     --external:@codemirror/view \
-    --format=cjs --target=es2018 \
+    --format=cjs --target=es2020 \
     --sourcemap=inline \
     --outfile=main.js \
     --log-level=info 2>&1 || error "编译失败"

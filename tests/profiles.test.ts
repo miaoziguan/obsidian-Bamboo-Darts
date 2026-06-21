@@ -80,7 +80,7 @@ describe('resolveProfileConfig', () => {
     const config = resolveProfileConfig('dense');
     expect(config).toEqual(PROFILE_CONFIGS.dense);
     expect(config.crossBatchThreshold).toBe(0.75);
-    expect(config.reviewMinScore).toBe(2);
+    expect(config.reviewMinScore).toBe(4);
     expect(config.gateMinDensity).toBe(0.15);
     expect(config.gateWarnDensity).toBe(0.50);
     expect(config.gateMaxNoiseRatio).toBe(0.75);
