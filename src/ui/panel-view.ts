@@ -95,7 +95,7 @@ export class AtomicNotesPanel extends ItemView {
     const inputPanel = container.createEl('div', { cls: 'atomic-notes-tab-content active', attr: { role: 'tabpanel', id: 'tab-panel-0', 'aria-labelledby': tabs[0].id || 'tab-0' } });
     const historyPanel = container.createEl('div', { cls: 'atomic-notes-tab-content', attr: { style: 'max-height:500px;overflow-y:auto', role: 'tabpanel', id: 'tab-panel-1', 'aria-labelledby': tabs[1].id || 'tab-1' } });
     const discoveryPanel = container.createEl('div', { cls: 'atomic-notes-tab-content', attr: { style: 'max-height:500px;overflow-y:auto', role: 'tabpanel', id: 'tab-panel-2', 'aria-labelledby': tabs[2].id || 'tab-2' } });
-    const aboutPanel = container.createEl('div', { cls: 'atomic-notes-tab-content', attr: { style: 'max-height:500px;overflow-y:auto', role: 'tabpanel', id: 'tab-panel-3', 'aria-labelledby': tabs[3].id || 'tab-3' } });
+    const aboutPanel = container.createEl('div', { cls: 'atomic-notes-tab-content', attr: { style: 'max-height:none;overflow-y:visible', role: 'tabpanel', id: 'tab-panel-3', 'aria-labelledby': tabs[3].id || 'tab-3' } });
     const contentPanels = [inputPanel, historyPanel, discoveryPanel, aboutPanel];
 
     // 进度区域 + 提炼按钮（初始隐藏，在 setupXxx 中创建）
@@ -506,6 +506,17 @@ export class AtomicNotesPanel extends ItemView {
       row.createEl('span', { text: detail, cls: 'detail-desc' });
     }
 
+    // ── URL 内容提取 ──
+    el.createEl('div', { text: 'URL 内容提取', cls: 'atomic-notes-about-section' });
+    el.createEl('p', {
+      text: '从网页链接读取内容时，插件先通过 80+ 选择器剥离导航、页脚、侧栏、广告、评论区、推荐、社交分享、法律声明等非正文区域，再清理 HTML 标签、注释和实体编码，确保送到 AI 手中的是干净的文本正文。',
+      cls: 'atomic-notes-about-text',
+    });
+    el.createEl('p', {
+      text: '同一 URL 提取结果会缓存 1 小时，重复提炼无需重新请求和解析。',
+      cls: 'atomic-notes-about-text',
+    });
+
     // ── 质量门控 ──
     el.createEl('div', { text: '质量门控', cls: 'atomic-notes-about-section' });
     const gateRules = [
@@ -530,7 +541,7 @@ export class AtomicNotesPanel extends ItemView {
       row.createEl('span', { text: warn, cls: 'gate-col-warn' });
     }
     el.createEl('p', {
-      text: '硬阻断的规则命中后直接拒绝提交流程；软警告仅提醒用户，不影响继续提炼。',
+      text: '硬阻断的规则命中后直接拒绝提交流程（可选强制提炼跳过）；软警告仅提醒用户，不影响继续提炼。累积 3 条警告自动升级为阻断。',
       cls: 'atomic-notes-about-text',
     });
     el.getElementsByClassName('atomic-notes-about-text')[el.getElementsByClassName('atomic-notes-about-text').length - 1].setAttr('style', 'margin-top:8px');
@@ -539,7 +550,7 @@ export class AtomicNotesPanel extends ItemView {
     el.createEl('div', { text: '内容核查（三层管线）', cls: 'atomic-notes-about-section' });
     el.createEl('p', { text: '从每条笔记中提取事实声明（数字、百分比、日期、实体名称），通过三层管线逐条核查：', cls: 'atomic-notes-about-text' });
     el.createEl('div', { text: 'Layer 1 · 原文溯源：零 API 调用，在原文中精确或模糊匹配声明锚点', cls: 'atomic-notes-about-bullet' });
-    el.createEl('div', { text: 'Layer 2 · 语义比对：单次 AI 调用，对无法溯源的声明进行语义级别比对', cls: 'atomic-notes-about-bullet' });
+    el.createEl('div', { text: 'Layer 2 · 语义比对：单次 AI 调用，仅发送截断文本以节省 token', cls: 'atomic-notes-about-bullet' });
     el.createEl('div', { text: 'Layer 3 · 超源标记：零 API 调用，将超出原文范围的声明标记为"超源"', cls: 'atomic-notes-about-bullet' });
     const verifyStatus = [
       ['已溯源', '声明与原文一致或可推导'],
@@ -554,10 +565,10 @@ export class AtomicNotesPanel extends ItemView {
 
     // ── 复查机制 ──
     el.createEl('div', { text: '复查机制', cls: 'atomic-notes-about-section' });
-    el.createEl('p', { text: '开启后 AI 从两个维度对每条笔记打分（1-5 分）：', cls: 'atomic-notes-about-text' });
+    el.createEl('p', { text: '开启后 AI 从两个维度对每条笔记打分（各 1-5 分）：', cls: 'atomic-notes-about-text' });
     const scoreItems = [
-      ['洞察力分', '是否包含独立观点或独特视角'],
-      ['知识价值分', '是否能为读者提供可迁移的领域知识'],
+      ['洞见价值', '是否包含独立见解、反直觉判断或有价值的观点'],
+      ['知识价值', '是否提供可学习的新领域知识或方法论'],
     ];
     for (const [label, desc] of scoreItems) {
       const row = el.createEl('div', { cls: 'atomic-notes-about-detail-row' });
@@ -565,10 +576,17 @@ export class AtomicNotesPanel extends ItemView {
       row.createEl('span', { text: desc, cls: 'detail-desc' });
     }
     el.createEl('p', {
-      text: '总分 < 3 的笔记被自动过滤，不进入知识库。这是提炼后的最后一道质量防线。',
+      text: '总分 = 洞见 + 知识（2-10）。等级：差(2-3) 中(4-5) 良(6-7) 优(8-10)。低于策略门槛的笔记被自动过滤，不进入知识库。这是提炼后的最后一道质量防线。',
       cls: 'atomic-notes-about-text',
     });
     el.getElementsByClassName('atomic-notes-about-text')[el.getElementsByClassName('atomic-notes-about-text').length - 1].setAttr('style', 'margin-top:6px');
+
+    // ── 超时与缓存 ──
+    el.createEl('div', { text: '超时与缓存', cls: 'atomic-notes-about-section' });
+    el.createEl('p', {
+      text: '提炼整体设有 5 分钟超时保护（深度模式 10 分钟），超时自动中止防止 API 挂死。URL 提取结果缓存 1 小时，重复提炼跳过 HTTP 请求和解析。',
+      cls: 'atomic-notes-about-text',
+    });
 
     // ── 作者 ──
     el.createEl('hr', { cls: 'atomic-notes-about-divider' });
