@@ -131,3 +131,25 @@ export const CN_WORD_DICT = new Set([
   '透明', '模糊', '明确', '隐含', '直接', '间接', '主动', '被动',
   '静态', '动态', '线性', '非线性', '确定', '随机', '复杂', '简单',
 ]);
+
+// ─── 语义去重（混元 Embedding）常量 ───
+
+/** 是否启用语义去重（Beta） */
+export const ENABLE_SEMANTIC_DEDUP_DEFAULT = false;
+
+/** 混元 embedding API 地址 */
+export const HUNYUAN_EMBEDDING_URL = 'https://api.hunyuan.cloud.tencent.com/hyllm/v1/embeddings';
+
+/** 语义相似度阈值：高于此值判定为重复（默认 0.82） */
+export const SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT = 0.82;
+
+/** 语义相似度阈值可调范围 */
+export const SEMANTIC_THRESHOLD_MIN = 0.60;
+export const SEMANTIC_THRESHOLD_MAX = 0.95;
+export const SEMANTIC_THRESHOLD_STEP = 0.01;
+
+/** 向量维度（hunyuan-embedding 为 1024） */
+export const EMBEDDING_DIM = 1024;
+
+/** 单次 embedding API 最大 batch 大小 */
+export const EMBEDDING_BATCH_SIZE = 16;
