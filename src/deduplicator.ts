@@ -157,6 +157,8 @@ export interface DuplicateInfo {
   removedContent: string;
   /** 语义相似度（启用语义去重时才有值） */
   semanticSimilarity?: number;
+  /** 本地算法相似度（BM25 + SimHash），合并前 */
+  localSimilarity?: number;
 }
 
 export interface DedupResult {
@@ -175,6 +177,8 @@ export interface VaultMatchInfo {
   } | null;
   /** 语义相似度（启用语义去重时才有值） */
   semanticSimilarity?: number;
+  /** 本地算法相似度（BM25 + SimHash），合并前 */
+  localSimilarity?: number;
   /** 语义匹配路径（本地无匹配、语义超阈值时填入 bestMatch） */
   semanticMatchPath?: string;
 }
@@ -563,29 +567,40 @@ export async function checkAgainstVaultDetailed(
     const semanticMatches = await semanticManager.findBestMatches(newContents, vaultVectors);
 
     // 用语义匹配结果增强本地结果
+    // 核心逻辑：本地和语义独立计算，取最高相似度
     for (let idx = 0; idx < results.length; idx++) {
       const semMatch = semanticMatches[idx];
+
+      // 记录语义相似度（始终记录，供 UI 展示「本地 X% / 语义 Y%」）
+      results[idx].semanticSimilarity = semMatch?.similarity ?? 0;
+
+      // ✅ 保存本地相似度（合并前），供 UI 展示分解
+      results[idx].localSimilarity = results[idx].bestMatch?.similarity ?? 0;
+
       if (!semMatch) continue;
 
-      // 记录语义相似度（供 UI 展示，不改变本地综合评分）
-      results[idx].semanticSimilarity = semMatch.similarity;
+      // ✅ 关键修复：比较本地和语义，取最高相似度
+      const localSim = results[idx].localSimilarity;
+      const semSim = semMatch.similarity;
 
-      // 仅当本地无匹配时，用语义结果补充（语义已在内部门槛过滤）
-      if (!results[idx].bestMatch) {
+      if (semSim > localSim) {
+        // 语义相似度更高，用语义结果覆盖 bestMatch
         const matchedFile = vault.getAbstractFileByPath(semMatch.path);
         let matchedContent = '';
         if (matchedFile instanceof TFile) {
           matchedContent = await vault.read(matchedFile);
         }
         results[idx].bestMatch = {
-          similarity: semMatch.similarity,
+          similarity: semSim,  // ✅ 用语义相似度（更高）
           path: semMatch.path,
           content: matchedContent.slice(0, 200) + (matchedContent.length > 200 ? '...' : ''),
         };
         results[idx].semanticMatchPath = semMatch.path;
       }
+      // 如果本地相似度更高或相等，保留本地结果（不改动 bestMatch）
     }
   }
 
   return results;
 }
+

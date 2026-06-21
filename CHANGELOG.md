@@ -1,5 +1,25 @@
 # Bamboo Darts 更新日志
 
+## v1.3.6 (2026-06-22)
+
+### 语义去重逻辑优化
+
+- **修复本地与语义结果合并逻辑**：改为「本地快筛 + 向量精判 独立并行，取最高相似度」
+  - 修复前：语义结果只在「本地无匹配」时才补充，导致语义高相似度（如 0.92）被本地低相似度（如 0.30）覆盖
+  - 修复后：本地和语义独立计算，最终相似度 = `max(本地相似度, 语义相似度)`
+- **新增「本地 X% / 语义 Y%」分解展示**
+  - 去重报告（`renderDedupReport`）：显示 `相似度：85%（本地 75% / 语义 92%）`
+  - 疑似重复面板（`renderPendingDuplicates`）：分别显示本地和语义相似度
+- **类型定义补齐**：`DuplicateInfo`、`VaultMatchInfo`、`PendingDuplicate` 新增 `localSimilarity` 字段
+
+### 涉及文件
+
+- `src/deduplicator.ts`：合并逻辑改为取 max；类型加 `localSimilarity`
+- `src/extractor.ts`：`PendingDuplicate` 加 `localSimilarity`；三处传参补齐
+- `src/ui/result-modal.ts`：去重报告和疑似重复面板都显示分解
+
+---
+
 ## v1.3.5 (2026-06-22)
 
 ### Bug 修复
@@ -139,3 +159,4 @@
 - 从选中文本 / URL 提炼原子笔记
 - 基本 AI 提炼流程
 - DeepSeek API 集成
+

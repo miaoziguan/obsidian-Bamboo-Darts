@@ -112,6 +112,7 @@ async function runVaultDedupPhase(
         newNoteContent: info.note.content,
         highSimilarity: true,
         semanticSimilarity: info.semanticSimilarity,
+        localSimilarity: info.localSimilarity ?? 0,
       });
     } else if (info.bestMatch.similarity >= MID_SIM_THRESHOLD) {
       // 中相似度：保留笔记，但标记为待确认
@@ -124,6 +125,7 @@ async function runVaultDedupPhase(
         newNoteTitle: info.note.title,
         newNoteContent: info.note.content,
         semanticSimilarity: info.semanticSimilarity,
+        localSimilarity: info.localSimilarity ?? 0,
       });
     } else {
       keptNotes.push(info.note);
@@ -141,6 +143,7 @@ async function runVaultDedupPhase(
         matchedNote: m.bestMatch!.path,
         matchedContent: m.bestMatch!.content,
         semanticSimilarity: m.semanticSimilarity,
+        localSimilarity: m.localSimilarity ?? 0,
       })),
   };
 
@@ -448,6 +451,8 @@ export interface PendingDuplicate {
   highSimilarity?: boolean;
   /** 语义相似度（启用语义去重时才有值） */
   semanticSimilarity?: number;
+  /** 本地算法相似度（BM25 + SimHash），合并前 */
+  localSimilarity?: number;
 }
 
 export async function runExtraction(
@@ -685,3 +690,4 @@ async function runExtractionPhases(
     reviewDetails,
   };
 }
+

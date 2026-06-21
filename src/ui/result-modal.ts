@@ -199,8 +199,18 @@ export class ResultModal extends Modal {
       });
       const dupList = reportEl.createEl('ul');
       for (const dup of this.dedupResult.duplicates) {
+        const sim = (dup.similarity * 100).toFixed(1);
+        let detail = `相似度：${sim}%`;
+        // 显示分解：本地 X% / 语义 Y%
+        if (dup.localSimilarity !== undefined && dup.semanticSimilarity !== undefined) {
+          detail += `（本地 ${(dup.localSimilarity * 100).toFixed(1)}% / 语义 ${(dup.semanticSimilarity * 100).toFixed(1)}%）`;
+        } else if (dup.semanticSimilarity !== undefined && dup.semanticSimilarity > 0) {
+          detail += `（语义 ${(dup.semanticSimilarity * 100).toFixed(1)}%）`;
+        } else {
+          detail += `（本地）`;
+        }
         dupList.createEl('li').setText(
-          `相似度：${(dup.similarity * 100).toFixed(1)}% | 匹配：${dup.matchedNote || '未知'}`
+          `${detail} | 匹配：${dup.matchedNote || '未知'}`
         );
       }
     }
@@ -395,10 +405,10 @@ export class ResultModal extends Modal {
         },
       });
 
-      // 相似度提示
-      const simPercent = (item.similarity * 100).toFixed(1);
+      // 相似度提示（本地 X% / 语义 Y%）
+      const localSim = (item.localSimilarity * 100).toFixed(1);
       const simColor = isHigh ? 'var(--color-red)' : 'var(--text-accent)';
-      let simLabel = isHigh ? `⚠ 本地 ${simPercent}%（高）` : `本地 ${simPercent}%`;
+      let simLabel = isHigh ? `⚠ 本地 ${localSim}%（高）` : `本地 ${localSim}%`;
       if (item.semanticSimilarity !== undefined) {
         const semPercent = (item.semanticSimilarity * 100).toFixed(1);
         simLabel += ` / 语义 ${semPercent}%`;
