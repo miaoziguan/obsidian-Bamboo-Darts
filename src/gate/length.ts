@@ -14,7 +14,7 @@ export function checkLength(
   minLength: number = DEFAULT_MIN_LENGTH,
   warnLength: number = DEFAULT_WARN_LENGTH,
   maxLength: number = DEFAULT_MAX_LENGTH,
-  warnMaxLength: number = DEFAULT_WARN_MAX_LENGTH
+  warnMaxLength: number = DEFAULT_WARN_MAX_LENGTH,
 ): GateResult {
   const len = content.length;
 

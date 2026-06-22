@@ -7,8 +7,18 @@
 import { App, PluginSettingTab, Setting, Notice, requestUrl } from 'obsidian';
 import AtomicNotesPlugin from '../main';
 import { ExtractionHistoryEntry } from '../services/history-service';
-import { ContentProfile, ProfileConfig, PROFILE_CONFIGS, PROFILE_LABELS } from '../extraction/profiles';
-import { HUNYUAN_EMBEDDING_URL, SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT, SEMANTIC_THRESHOLD_MIN, SEMANTIC_THRESHOLD_MAX, SEMANTIC_THRESHOLD_STEP } from '../constants';
+import {
+  ContentProfile,
+  ProfileConfig,
+  PROFILE_CONFIGS,
+} from '../extraction/profiles';
+import {
+  HUNYUAN_EMBEDDING_URL,
+  SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT,
+  SEMANTIC_THRESHOLD_MIN,
+  SEMANTIC_THRESHOLD_MAX,
+  SEMANTIC_THRESHOLD_STEP,
+} from '../constants';
 
 export interface PluginSettings {
   // 设置版本号（用于迁移）
@@ -132,7 +142,8 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   private addDivider(containerEl: HTMLElement): void {
     containerEl.createEl('hr', {
       attr: {
-        style: 'margin:20px 0 16px;border:none;border-top:1px solid var(--background-modifier-border)',
+        style:
+          'margin:20px 0 16px;border:none;border-top:1px solid var(--background-modifier-border)',
       },
     });
   }
@@ -151,80 +162,74 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('API Key')
       .setDesc('你的 API Key（必需）')
-      .addText(text => {
+      .addText((text) => {
         text
           .setPlaceholder('sk-...')
           .setValue(this.plugin.settings.deepseekApiKey)
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.deepseekApiKey = value.trim();
             await this.plugin.saveSettings();
           });
         text.inputEl.type = 'password';
       })
-      .addButton(btn =>
-        btn.setButtonText('获取 Key')
+      .addButton((btn) =>
+        btn
+          .setButtonText('获取 Key')
           .setTooltip('前往 DeepSeek 官网注册并获取 API Key')
           .onClick(() => {
             window.open('https://platform.deepseek.com/api_keys', '_blank');
-          })
+          }),
       );
 
     new Setting(containerEl)
       .setName('API URL')
       .setDesc('API 地址（默认：DeepSeek）')
-      .addText(text =>
-        text
-          .setValue(this.plugin.settings.deepseekApiUrl)
-          .onChange(async value => {
-            this.plugin.settings.deepseekApiUrl = value.trim();
-            await this.plugin.saveSettings();
-          })
+      .addText((text) =>
+        text.setValue(this.plugin.settings.deepseekApiUrl).onChange(async (value) => {
+          this.plugin.settings.deepseekApiUrl = value.trim();
+          await this.plugin.saveSettings();
+        }),
       )
-      .addButton(btn =>
-        btn.setButtonText('获取 Key')
+      .addButton((btn) =>
+        btn
+          .setButtonText('获取 Key')
           .setTooltip('前往 DeepSeek 官网注册并获取 API Key')
           .onClick(() => {
             window.open('https://platform.deepseek.com/api_keys', '_blank');
-          })
+          }),
       );
 
     new Setting(containerEl)
       .setName('模型')
       .setDesc('使用的模型（默认：deepseek-v4-flash）')
-      .addText(text =>
-        text
-          .setValue(this.plugin.settings.model)
-          .onChange(async value => {
-            this.plugin.settings.model = value.trim();
-            await this.plugin.saveSettings();
-          })
+      .addText((text) =>
+        text.setValue(this.plugin.settings.model).onChange(async (value) => {
+          this.plugin.settings.model = value.trim();
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl)
       .setName('最大 Token 数')
       .setDesc('AI 输出的最大 Token 数（默认：6000）')
-      .addText(text =>
-        text
-          .setValue(String(this.plugin.settings.maxTokens))
-          .onChange(async value => {
-            const num = parseInt(value, 10);
-            if (!isNaN(num) && num > 0) {
-              this.plugin.settings.maxTokens = num;
-              await this.plugin.saveSettings();
-            }
-          })
+      .addText((text) =>
+        text.setValue(String(this.plugin.settings.maxTokens)).onChange(async (value) => {
+          const num = parseInt(value, 10);
+          if (!isNaN(num) && num > 0) {
+            this.plugin.settings.maxTokens = num;
+            await this.plugin.saveSettings();
+          }
+        }),
       );
 
     // 测试连接（紧邻 API 配置）
     new Setting(containerEl)
       .setName('测试连接')
       .setDesc('验证 API Key 是否有效')
-      .addButton(button =>
-        button
-          .setButtonText('测试连接')
-          .onClick(async () => {
-            await this.testConnection();
-          })
+      .addButton((button) =>
+        button.setButtonText('测试连接').onClick(async () => {
+          await this.testConnection();
+        }),
       );
 
     this.addDivider(containerEl);
@@ -237,50 +242,46 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('目标文件夹')
       .setDesc('原子笔记保存的文件夹（默认：原子笔记）')
-      .addText(text =>
-        text
-          .setValue(this.plugin.settings.targetFolder)
-          .onChange(async value => {
-            this.plugin.settings.targetFolder = value.trim() || '原子笔记';
-            await this.plugin.saveSettings();
-          })
+      .addText((text) =>
+        text.setValue(this.plugin.settings.targetFolder).onChange(async (value) => {
+          this.plugin.settings.targetFolder = value.trim() || '原子笔记';
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl)
       .setName('去重目标文件夹')
-      .setDesc('去重比对时读取的文件夹。留空则复用「目标文件夹」，适合有隐私需求的用户限制去重范围。')
-      .addText(text =>
+      .setDesc(
+        '去重比对时读取的文件夹。留空则复用「目标文件夹」，适合有隐私需求的用户限制去重范围。',
+      )
+      .addText((text) =>
         text
           .setPlaceholder('留空 = 复用目标文件夹')
           .setValue(this.plugin.settings.dedupTargetFolder)
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.dedupTargetFolder = value.trim();
             await this.plugin.saveSettings();
-          })
+          }),
       );
 
     new Setting(containerEl)
       .setName('文件名模板')
       .setDesc('支持变量：{{title}}, {{date}}, {{time}}, {{timestamp}}')
-      .addText(text =>
-        text
-          .setValue(this.plugin.settings.fileNameTemplate)
-          .onChange(async value => {
-            this.plugin.settings.fileNameTemplate = value.trim() || '{{title}}';
-            await this.plugin.saveSettings();
-          })
+      .addText((text) =>
+        text.setValue(this.plugin.settings.fileNameTemplate).onChange(async (value) => {
+          this.plugin.settings.fileNameTemplate = value.trim() || '{{title}}';
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl)
       .setName('自动保存')
       .setDesc('启用后，提炼完成自动保存到知识库（不显示结果弹窗）')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.autoSave)
-          .onChange(async value => {
-            this.plugin.settings.autoSave = value;
-            await this.plugin.saveSettings();
-          })
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autoSave).onChange(async (value) => {
+          this.plugin.settings.autoSave = value;
+          await this.plugin.saveSettings();
+        }),
       );
 
     this.addDivider(containerEl);
@@ -290,99 +291,104 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // ================================================================
     containerEl.createEl('h3', { text: '语义去重（Beta）' });
 
-    const semToggle = new Setting(containerEl)
+    const _semToggle = new Setting(containerEl)
       .setName('启用语义去重')
       .setDesc('使用腾讯混元向量模型检测"换说法但意思相同"的重复笔记。需要填写下方混元 API Key。')
-      .addToggle(toggle =>
-        toggle
-          .setValue(!!this.plugin.settings.enableSemanticDedup)
-          .onChange(async value => {
-            this.plugin.settings.enableSemanticDedup = value;
-            await this.plugin.saveSettings();
-            this.display();
-          })
+      .addToggle((toggle) =>
+        toggle.setValue(!!this.plugin.settings.enableSemanticDedup).onChange(async (value) => {
+          this.plugin.settings.enableSemanticDedup = value;
+          await this.plugin.saveSettings();
+          this.display();
+        }),
       );
 
     if (this.plugin.settings.enableSemanticDedup) {
       new Setting(containerEl)
         .setName('混元 API Key')
         .setDesc('腾讯混元 API Key（必需）')
-        .addText(text => {
+        .addText((text) => {
           text
             .setPlaceholder('sk-...')
             .setValue(this.plugin.settings.hunyuanApiKey || '')
-            .onChange(async value => {
+            .onChange(async (value) => {
               this.plugin.settings.hunyuanApiKey = value.trim();
               await this.plugin.saveSettings();
             });
           text.inputEl.type = 'password';
         })
-        .addButton(btn =>
-          btn.setButtonText('获取 Key')
+        .addButton((btn) =>
+          btn
+            .setButtonText('获取 Key')
             .setTooltip('前往腾讯混元官网注册并获取 API Key')
             .onClick(() => {
               window.open('https://hunyuan.tencent.com/portal/guide', '_blank');
-            })
+            }),
         );
 
       new Setting(containerEl)
         .setName('混元 API URL（可选）')
         .setDesc('留空则使用默认地址')
-        .addText(text =>
+        .addText((text) =>
           text
             .setPlaceholder(HUNYUAN_EMBEDDING_URL)
             .setValue(this.plugin.settings.hunyuanApiUrl || '')
-            .onChange(async value => {
+            .onChange(async (value) => {
               this.plugin.settings.hunyuanApiUrl = value.trim();
               await this.plugin.saveSettings();
-            })
+            }),
         );
 
       new Setting(containerEl)
         .setName('语义相似度阈值')
-        .setDesc(`高于此值判定为重复。值越高越严格（默认 ${SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT}）`)
-        .addSlider(s =>
-          s.setLimits(SEMANTIC_THRESHOLD_MIN, SEMANTIC_THRESHOLD_MAX, SEMANTIC_THRESHOLD_STEP)
-            .setValue(this.plugin.settings.semanticSimilarityThreshold || SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT)
+        .setDesc(
+          `高于此值判定为重复。值越高越严格（默认 ${SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT}）`,
+        )
+        .addSlider((s) =>
+          s
+            .setLimits(SEMANTIC_THRESHOLD_MIN, SEMANTIC_THRESHOLD_MAX, SEMANTIC_THRESHOLD_STEP)
+            .setValue(
+              this.plugin.settings.semanticSimilarityThreshold ||
+                SEMANTIC_SIMILARITY_THRESHOLD_DEFAULT,
+            )
             .setDynamicTooltip()
-            .onChange(async v => {
+            .onChange(async (v) => {
               this.plugin.settings.semanticSimilarityThreshold = v;
               await this.plugin.saveSettings();
-            })
+            }),
         );
 
       // 「预构建向量索引」按钮
       new Setting(containerEl)
         .setName('预构建向量索引')
         .setDesc('首次开启语义去重时，建议先构建索引，避免提炼时意外触发大量 API 调用。')
-        .addButton(btn =>
-          btn.setButtonText('开始构建')
+        .addButton((btn) =>
+          btn
+            .setButtonText('开始构建')
             .setCta()
             .onClick(async () => {
               await this.plugin.rebuildVectorIndex();
               this.display();
-            })
+            }),
         );
 
       // 「清空向量缓存」按钮
       new Setting(containerEl)
         .setName('清空向量缓存')
         .setDesc('删除所有已缓存的向量数据，下次提炼时重新计算。')
-        .addButton(btn =>
-          btn.setButtonText('清空缓存')
-            .onClick(async () => {
-              const cacheFile = this.plugin.manifest?.dir
-                ? `${this.plugin.manifest.dir}/vector-cache.json`
-                : `${this.plugin.app.vault.configDir}/plugins/atomic-notes-extractor/vector-cache.json`;
-              const adapter = this.plugin.app.vault.adapter;
-              if (await adapter.exists(cacheFile)) {
-                await adapter.remove(cacheFile);
-                new Notice('向量缓存已清空，下次提炼时将重新构建。');
-              } else {
-                new Notice('暂无向量缓存文件。');
-              }
-              this.display();
-            })
+        .addButton((btn) =>
+          btn.setButtonText('清空缓存').onClick(async () => {
+            const cacheFile = this.plugin.manifest?.dir
+              ? `${this.plugin.manifest.dir}/vector-cache.json`
+              : `${this.plugin.app.vault.configDir}/plugins/atomic-notes-extractor/vector-cache.json`;
+            const adapter = this.plugin.app.vault.adapter;
+            if (await adapter.exists(cacheFile)) {
+              await adapter.remove(cacheFile);
+              new Notice('向量缓存已清空，下次提炼时将重新构建。');
+            } else {
+              new Notice('暂无向量缓存文件。');
+            }
+            this.display();
+          }),
         );
     }
 
@@ -396,31 +402,31 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('标签词汇表')
       .setDesc('输入偏好标签，逗号或换行分隔，如：设计思维, 用户研究, AI')
-      .addTextArea(text =>
+      .addTextArea((text) =>
         text
           .setPlaceholder('设计思维, 用户研究, AI')
           .setValue((this.plugin.settings.tagPreferences || []).join(', '))
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.tagPreferences = value
               .split(/[,，\n]+/)
-              .map(s => s.trim())
+              .map((s) => s.trim())
               .filter(Boolean);
             await this.plugin.saveSettings();
-          })
+          }),
       );
 
     new Setting(containerEl)
       .setName('标签模式')
       .setDesc('宽松：优先使用偏好标签，允许新增；严格：仅使用偏好标签')
-      .addDropdown(dropdown =>
+      .addDropdown((dropdown) =>
         dropdown
           .addOption('lenient', '宽松模式')
           .addOption('strict', '严格模式')
           .setValue(this.plugin.settings.tagMode || 'lenient')
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.tagMode = value as 'lenient' | 'strict';
             await this.plugin.saveSettings();
-          })
+          }),
       );
 
     this.addDivider(containerEl);
@@ -433,13 +439,11 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('自动创建源文件反向链接')
       .setDesc('从选中文本提炼时，在源文件插入 [[笔记标题]] 链接（仅对「选中文本提炼」生效）')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.autoBacklink)
-          .onChange(async value => {
-            this.plugin.settings.autoBacklink = value;
-            await this.plugin.saveSettings();
-          })
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autoBacklink).onChange(async (value) => {
+          this.plugin.settings.autoBacklink = value;
+          await this.plugin.saveSettings();
+        }),
       );
 
     this.addDivider(containerEl);
@@ -451,26 +455,24 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('启用内容核查')
-      .setDesc('提炼后自动核查笔记中的事实和数据是否能在原文中找到依据（每次提炼额外消耗 1 次 API 调用）')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.factCheck)
-          .onChange(async value => {
-            this.plugin.settings.factCheck = value;
-            await this.plugin.saveSettings();
-          })
+      .setDesc(
+        '提炼后自动核查笔记中的事实和数据是否能在原文中找到依据（每次提炼额外消耗 1 次 API 调用）',
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.factCheck).onChange(async (value) => {
+          this.plugin.settings.factCheck = value;
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl)
       .setName('仅保存可溯源笔记')
       .setDesc('开启时自动过滤包含超源声明的笔记（需先启用上方「启用内容核查」）')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.verifiedOnly)
-          .onChange(async value => {
-            this.plugin.settings.verifiedOnly = value;
-            await this.plugin.saveSettings();
-          })
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.verifiedOnly).onChange(async (value) => {
+          this.plugin.settings.verifiedOnly = value;
+          await this.plugin.saveSettings();
+        }),
       );
 
     this.addDivider(containerEl);
@@ -480,58 +482,58 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // ================================================================
     containerEl.createEl('h3', { text: '笔记复查（AI 双重保险）' });
 
-    const reviewToggleSetting = new Setting(containerEl)
+    const _reviewToggleSetting = new Setting(containerEl)
       .setName('启用笔记复查')
-      .setDesc('提炼完成后，用 AI 对笔记价值评分，自动过滤低质量笔记（评分<3）（每次提炼额外消耗 1 次 API 调用）')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.enableReview || false)
-          .onChange(async value => {
-            this.plugin.settings.enableReview = value;
-            await this.plugin.saveSettings();
-            this.display();
-          })
+      .setDesc(
+        '提炼完成后，用 AI 对笔记价值评分，自动过滤低质量笔记（评分<3）（每次提炼额外消耗 1 次 API 调用）',
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.enableReview || false).onChange(async (value) => {
+          this.plugin.settings.enableReview = value;
+          await this.plugin.saveSettings();
+          this.display();
+        }),
       );
 
     if (this.plugin.settings.enableReview) {
-    new Setting(containerEl)
-      .setName('复查模型（可选）')
-      .setDesc('复查用模型名称（如 gpt-4o、claude-3-5-sonnet）。留空则复用提炼模型')
-      .addText(text =>
-        text
-          .setPlaceholder('留空则使用提炼模型')
-          .setValue(this.plugin.settings.reviewModel || '')
-          .onChange(async value => {
-            this.plugin.settings.reviewModel = value.trim();
-            await this.plugin.saveSettings();
-          })
-      );
+      new Setting(containerEl)
+        .setName('复查模型（可选）')
+        .setDesc('复查用模型名称（如 gpt-4o、claude-3-5-sonnet）。留空则复用提炼模型')
+        .addText((text) =>
+          text
+            .setPlaceholder('留空则使用提炼模型')
+            .setValue(this.plugin.settings.reviewModel || '')
+            .onChange(async (value) => {
+              this.plugin.settings.reviewModel = value.trim();
+              await this.plugin.saveSettings();
+            }),
+        );
 
-    new Setting(containerEl)
-      .setName('复查 API URL（可选）')
-      .setDesc('复查用 API 地址。留空则复用提炼 API 地址')
-      .addText(text =>
-        text
-          .setPlaceholder('留空则使用提炼 API 地址')
-          .setValue(this.plugin.settings.reviewApiUrl || '')
-          .onChange(async value => {
-            this.plugin.settings.reviewApiUrl = value.trim();
-            await this.plugin.saveSettings();
-          })
-      );
+      new Setting(containerEl)
+        .setName('复查 API URL（可选）')
+        .setDesc('复查用 API 地址。留空则复用提炼 API 地址')
+        .addText((text) =>
+          text
+            .setPlaceholder('留空则使用提炼 API 地址')
+            .setValue(this.plugin.settings.reviewApiUrl || '')
+            .onChange(async (value) => {
+              this.plugin.settings.reviewApiUrl = value.trim();
+              await this.plugin.saveSettings();
+            }),
+        );
 
-    new Setting(containerEl)
-      .setName('复查 API Key（可选）')
-      .setDesc('复查用 API Key。留空则复用提炼 API Key')
-      .addText(text =>
-        text
-          .setPlaceholder('留空则使用提炼 API Key')
-          .setValue(this.plugin.settings.reviewApiKey || '')
-          .onChange(async value => {
-            this.plugin.settings.reviewApiKey = value.trim();
-            await this.plugin.saveSettings();
-          })
-      );
+      new Setting(containerEl)
+        .setName('复查 API Key（可选）')
+        .setDesc('复查用 API Key。留空则复用提炼 API Key')
+        .addText((text) =>
+          text
+            .setPlaceholder('留空则使用提炼 API Key')
+            .setValue(this.plugin.settings.reviewApiKey || '')
+            .onChange(async (value) => {
+              this.plugin.settings.reviewApiKey = value.trim();
+              await this.plugin.saveSettings();
+            }),
+        );
     } // end if enableReview
 
     // ================================================================
@@ -542,13 +544,11 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('启用关联推荐')
       .setDesc('选中笔记后显示 Top10 相关笔记')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.discoveryRecommendation)
-          .onChange(async value => {
-            this.plugin.settings.discoveryRecommendation = value;
-            await this.plugin.saveSettings();
-          })
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.discoveryRecommendation).onChange(async (value) => {
+          this.plugin.settings.discoveryRecommendation = value;
+          await this.plugin.saveSettings();
+        }),
       );
 
     this.addDivider(containerEl);
@@ -558,42 +558,43 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // ================================================================
     containerEl.createEl('h3', { text: '过滤策略' });
 
-    new Setting(containerEl)
-      .setDesc('不同类型的文章需要不同的过滤强度。技术文献信息密集，应保留更多笔记；观点评论注重精华，只保留最有价值的洞见。');
+    new Setting(containerEl).setDesc(
+      '不同类型的文章需要不同的过滤强度。技术文献信息密集，应保留更多笔记；观点评论注重精华，只保留最有价值的洞见。',
+    );
 
     new Setting(containerEl)
       .setName('智能识别文章类型')
       .setDesc('开启后自动判断内容特征，为每篇文章选择最合适的过滤策略')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.autoClassify)
-          .onChange(async value => {
-            this.plugin.settings.autoClassify = value;
-            await this.plugin.saveSettings();
-            this.display();
-          })
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autoClassify).onChange(async (value) => {
+          this.plugin.settings.autoClassify = value;
+          await this.plugin.saveSettings();
+          this.display();
+        }),
       );
 
     if (!this.plugin.settings.autoClassify) {
       new Setting(containerEl)
         .setName('选择策略')
         .setDesc('手动指定当前文章适合的过滤强度')
-        .addDropdown(dropdown =>
+        .addDropdown((dropdown) =>
           dropdown
             .addOption('dense', '技术文献（技术文档、论文、教程 — 保留更多笔记）')
             .addOption('balanced', '通用文章（一般文章 — 平衡数量与质量）')
             .addOption('sparse', '观点评论（社论、书评、随笔 — 只留精华）')
             .setValue(this.plugin.settings.contentProfile)
-            .onChange(async value => {
+            .onChange(async (value) => {
               this.plugin.settings.contentProfile = value as ContentProfile;
               await this.plugin.saveSettings();
               this.display();
-            })
+            }),
         );
     }
 
     // 当前策略预览
-    const currentProfile = this.plugin.settings.autoClassify ? null : this.plugin.settings.contentProfile;
+    const currentProfile = this.plugin.settings.autoClassify
+      ? null
+      : this.plugin.settings.contentProfile;
     if (!this.plugin.settings.autoClassify && currentProfile) {
       const previewMap: Record<ContentProfile, { label: string; desc: string }> = {
         dense: {
@@ -626,10 +627,10 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     const advancedToggle = new Setting(containerEl)
       .setName('高级参数调整')
       .setDesc('手动调整各策略的去重阈值和质量门槛，一般无需修改');
-    
+
     let advancedContainer: HTMLElement | null = null;
-    advancedToggle.addToggle(toggle =>
-      toggle.setValue(false).onChange(show => {
+    advancedToggle.addToggle((toggle) =>
+      toggle.setValue(false).onChange((show) => {
         if (show && !advancedContainer) {
           advancedContainer = containerEl.createEl('div', { cls: 'filter-advanced-settings' });
           // 插入到 toggle 设置项的紧后面，而不是容器末尾
@@ -643,7 +644,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           new Setting(advancedContainer)
             .setName('恢复默认参数')
             .setDesc('将所有策略的阈值恢复为出厂设置')
-            .addButton(btn =>
+            .addButton((btn) =>
               btn
                 .setButtonText('重置')
                 .setWarning()
@@ -653,10 +654,13 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
                   this.plugin.settings.profileSparse = { ...PROFILE_CONFIGS.sparse };
                   await this.plugin.saveSettings();
                   this.display();
-                })
+                }),
             );
 
-          const profiles: { key: 'profileDense' | 'profileBalanced' | 'profileSparse'; label: string }[] = [
+          const profiles: {
+            key: 'profileDense' | 'profileBalanced' | 'profileSparse';
+            label: string;
+          }[] = [
             { key: 'profileDense', label: '技术文献' },
             { key: 'profileBalanced', label: '通用文章' },
             { key: 'profileSparse', label: '观点评论' },
@@ -670,48 +674,66 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
             new Setting(advancedContainer)
               .setName('批内去重严格度')
               .setDesc('同批提炼的笔记之间，相似度多高才算重复？值越高越宽松')
-              .addSlider(s => s
-                .setLimits(0.3, 1.0, 0.05)
-                .setValue(cfg.crossBatchThreshold)
-                .setDynamicTooltip()
-                .onChange(async v => { this.plugin.settings[key].crossBatchThreshold = v; await this.plugin.saveSettings(); })
+              .addSlider((s) =>
+                s
+                  .setLimits(0.3, 1.0, 0.05)
+                  .setValue(cfg.crossBatchThreshold)
+                  .setDynamicTooltip()
+                  .onChange(async (v) => {
+                    this.plugin.settings[key].crossBatchThreshold = v;
+                    await this.plugin.saveSettings();
+                  }),
               );
 
             new Setting(advancedContainer)
               .setName('与已有笔记去重（自动丢弃）')
               .setDesc('和知识库已有笔记太相似时直接丢弃。值越高越宽松')
-              .addSlider(s => s
-                .setLimits(0.5, 1.0, 0.05)
-                .setValue(cfg.vaultHighThreshold)
-                .setDynamicTooltip()
-                .onChange(async v => { this.plugin.settings[key].vaultHighThreshold = v; await this.plugin.saveSettings(); })
+              .addSlider((s) =>
+                s
+                  .setLimits(0.5, 1.0, 0.05)
+                  .setValue(cfg.vaultHighThreshold)
+                  .setDynamicTooltip()
+                  .onChange(async (v) => {
+                    this.plugin.settings[key].vaultHighThreshold = v;
+                    await this.plugin.saveSettings();
+                  }),
               );
 
             new Setting(advancedContainer)
               .setName('与已有笔记去重（待确认）')
               .setDesc('相似度低于上一条但仍较高时，标记为"待确认"让你手动决定')
-              .addSlider(s => s
-                .setLimits(0.3, 0.9, 0.05)
-                .setValue(cfg.vaultMidThreshold)
-                .setDynamicTooltip()
-                .onChange(async v => { this.plugin.settings[key].vaultMidThreshold = v; await this.plugin.saveSettings(); })
+              .addSlider((s) =>
+                s
+                  .setLimits(0.3, 0.9, 0.05)
+                  .setValue(cfg.vaultMidThreshold)
+                  .setDynamicTooltip()
+                  .onChange(async (v) => {
+                    this.plugin.settings[key].vaultMidThreshold = v;
+                    await this.plugin.saveSettings();
+                  }),
               );
 
             new Setting(advancedContainer)
               .setName('质量评分门槛')
-              .setDesc('AI 复查总分（洞见+知识，2-10）低于此值的笔记会被丢弃。技术文献 4、通用文章 6、观点评论 7')
-              .addSlider(s => s
-                .setLimits(1, 10, 1)
-                .setValue(cfg.reviewMinScore)
-                .setDynamicTooltip()
-                .onChange(async v => { this.plugin.settings[key].reviewMinScore = v; await this.plugin.saveSettings(); })
+              .setDesc(
+                'AI 复查总分（洞见+知识，2-10）低于此值的笔记会被丢弃。技术文献 4、通用文章 6、观点评论 7',
+              )
+              .addSlider((s) =>
+                s
+                  .setLimits(1, 10, 1)
+                  .setValue(cfg.reviewMinScore)
+                  .setDynamicTooltip()
+                  .onChange(async (v) => {
+                    this.plugin.settings[key].reviewMinScore = v;
+                    await this.plugin.saveSettings();
+                  }),
               );
           }
         } else if (!show && advancedContainer) {
           advancedContainer.remove();
           advancedContainer = null;
         }
-      })
+      }),
     );
 
     this.addDivider(containerEl);
@@ -724,28 +746,28 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('启用深度提炼模式')
       .setDesc('对超长文章自动分段提炼，消耗更多 token')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.enableDeepMode)
-          .onChange(async value => {
-            this.plugin.settings.enableDeepMode = value;
-            await this.plugin.saveSettings();
-          })
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.enableDeepMode).onChange(async (value) => {
+          this.plugin.settings.enableDeepMode = value;
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl)
       .setName('输入截断长度')
-      .setDesc('超过此字数的文本将被截断后再发送给 AI（默认 10000 字，增大可保留更多内容但消耗更多 token）')
-      .addText(text =>
+      .setDesc(
+        '超过此字数的文本将被截断后再发送给 AI（默认 10000 字，增大可保留更多内容但消耗更多 token）',
+      )
+      .addText((text) =>
         text
           .setValue(String(this.plugin.settings.inputTruncateLength ?? 10000))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 1000) {
               this.plugin.settings.inputTruncateLength = num;
               await this.plugin.saveSettings();
             }
-          })
+          }),
       );
 
     this.addDivider(containerEl);
@@ -758,20 +780,19 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('面板位置')
       .setDesc('控制插件面板在 Obsidian 界面中显示的位置')
-      .addDropdown(dropdown =>
+      .addDropdown((dropdown) =>
         dropdown
           .addOption('right', '右侧栏（推荐，与属性面板同列）')
           .addOption('left', '左侧栏（与文件树、标签同列）')
           .addOption('tab', '新标签页')
           .addOption('split', '分屏（当前编辑器分屏显示）')
           .setValue(this.plugin.settings.panelPosition || 'right')
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.panelPosition = value as 'left' | 'right' | 'tab' | 'split';
             await this.plugin.saveSettings();
             new Notice('面板位置已更新，重新打开插件面板即可生效');
-          })
+          }),
       );
-
   }
 
   async testConnection(): Promise<void> {
@@ -791,7 +812,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${deepseekApiKey}`,
+          Authorization: `Bearer ${deepseekApiKey}`,
         },
         body: JSON.stringify({
           model,

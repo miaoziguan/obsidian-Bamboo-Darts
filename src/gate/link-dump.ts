@@ -4,17 +4,14 @@ const ok = (): GateResult => ({ status: 'ok' });
 const warn = (reason: string): GateResult => ({ status: 'warn', reason });
 const block = (reason: string): GateResult => ({ status: 'block', reason });
 
-const LINK_PATTERNS: RegExp[] = [
-  /https?:\/\/\S+/g,
-  /www\.\S+\.\S+/g,
-];
+const LINK_PATTERNS: RegExp[] = [/https?:\/\/\S+/g, /www\.\S+\.\S+/g];
 
 const NAV_SEPARATOR_PATTERN = /\s*[|·•»›▸→]\s*/g;
 
 export function checkLinkDump(
   content: string,
   linkBlockRatio?: number,
-  linkBlockDensity?: number
+  linkBlockDensity?: number,
 ): GateResult {
   if (content.length < 100) return ok();
 
@@ -38,7 +35,9 @@ export function checkLinkDump(
   const linkDensityVal = linkCount / (content.length / 100);
 
   if (linkRatio > blockRatio && linkCount >= 5 && linkDensityVal > blockDensity) {
-    return block(`内容中链接占比过高（${(linkRatio * 100).toFixed(0)}%，${linkCount} 个链接），可能为导航页而非文章`);
+    return block(
+      `内容中链接占比过高（${(linkRatio * 100).toFixed(0)}%，${linkCount} 个链接），可能为导航页而非文章`,
+    );
   }
 
   if (navSeparators >= 5) {

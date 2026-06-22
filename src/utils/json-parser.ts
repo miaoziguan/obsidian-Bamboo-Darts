@@ -5,11 +5,11 @@
 
 /**
  * 从 AI 输出文本中解析 JSON 数组
- * 
+ *
  * 处理常见格式：
  * - 纯 JSON 数组：[{"key": "value"}]
  * - 代码块包裹：```json [...] ``` 或 ``` [...] ```
- * 
+ *
  * @param aiContent AI 返回的原始文本
  * @returns 解析后的 JSON 数组，解析失败返回 null
  */

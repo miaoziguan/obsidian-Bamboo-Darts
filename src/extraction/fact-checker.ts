@@ -5,7 +5,11 @@
 
 import { requestUrl } from 'obsidian';
 import { AtomicNote, VerificationItem } from '../utils/notes-standards';
-import { extractVerifiableClaims, locateAnchorInSource, VerifiableClaim } from '../utils/data-extractor';
+import {
+  extractVerifiableClaims,
+  locateAnchorInSource,
+  VerifiableClaim,
+} from '../utils/data-extractor';
 import { parseJsonArrayFromAI } from '../utils/json-parser';
 
 /** 空白规范化：合并连续空格/换行/制表符为单个空格，去除首尾空白 */
@@ -99,7 +103,10 @@ export async function verifyClaims(
         if (aiResult) {
           // AI 验证：检查 sourceText 是否真实存在于原文
           if (aiResult.status === '需对比' && aiResult.sourceText) {
-            if (!normalizeWS(layer2Content).includes(normalizeWS(aiResult.sourceText)) && !(fullContent && normalizeWS(fullContent).includes(normalizeWS(aiResult.sourceText)))) {
+            if (
+              !normalizeWS(layer2Content).includes(normalizeWS(aiResult.sourceText)) &&
+              !(fullContent && normalizeWS(fullContent).includes(normalizeWS(aiResult.sourceText)))
+            ) {
               // AI 编造引用 → 降级为 '超源'
               items.push({
                 claim: ctx.claim.claim,
@@ -154,15 +161,17 @@ export async function verifyClaims(
 
   // ─── 汇总 ───
 
-  let totalTraced = 0, totalNeedsCompare = 0, totalOutOfScope = 0;
+  let totalTraced = 0,
+    totalNeedsCompare = 0,
+    totalOutOfScope = 0;
 
   for (let i = 0; i < notes.length; i++) {
     const items = allResults.get(i) || [];
 
     notes[i].verification = items;
-    notes[i].tracedCount = items.filter(v => v.status === '已溯源').length;
-    notes[i].needsCompareCount = items.filter(v => v.status === '需对比').length;
-    notes[i].outOfScopeCount = items.filter(v => v.status === '超源').length;
+    notes[i].tracedCount = items.filter((v) => v.status === '已溯源').length;
+    notes[i].needsCompareCount = items.filter((v) => v.status === '需对比').length;
+    notes[i].outOfScopeCount = items.filter((v) => v.status === '超源').length;
 
     totalTraced += notes[i].tracedCount;
     totalNeedsCompare += notes[i].needsCompareCount;
@@ -192,9 +201,17 @@ async function semanticCompare(
     model?: string;
     maxTokens?: number;
     signal?: AbortSignal;
-  }
-): Promise<Map<number, { status: '需对比' | '超源'; sourceText?: string; diffNote?: string; reason?: string }>> {
-  const resultMap = new Map<number, { status: '需对比' | '超源'; sourceText?: string; diffNote?: string; reason?: string }>();
+  },
+): Promise<
+  Map<
+    number,
+    { status: '需对比' | '超源'; sourceText?: string; diffNote?: string; reason?: string }
+  >
+> {
+  const resultMap = new Map<
+    number,
+    { status: '需对比' | '超源'; sourceText?: string; diffNote?: string; reason?: string }
+  >();
 
   const systemPrompt = `你是原文比对助手。以下声明来自对原文的提炼总结，但在原文中未找到精确匹配。
 请为每条声明找出原文中最相关的句子（必须直接引用原文原句）。
@@ -215,7 +232,7 @@ async function semanticCompare(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.deepseekApiKey}`,
+      Authorization: `Bearer ${config.deepseekApiKey}`,
     },
     body: JSON.stringify({
       model: config.model || 'deepseek-v4-flash',
@@ -245,7 +262,7 @@ async function semanticCompare(
 
   if (parsed) {
     for (const item of parsed) {
-      const status = item.status === '需对比' ? '需对比' as const : '超源' as const;
+      const status = item.status === '需对比' ? ('需对比' as const) : ('超源' as const);
       const idx = typeof item.index === 'number' ? item.index : Number(item.index);
       if (!isNaN(idx) && idx >= 0 && idx < unmatched.length) {
         resultMap.set(idx, {

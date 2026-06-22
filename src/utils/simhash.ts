@@ -27,7 +27,7 @@ export function simhash(weights: Map<string, number>): bigint {
   let fingerprint = 0n;
   for (let i = 0; i < 64; i++) {
     if (vector[i] > 0) {
-      fingerprint |= (1n << BigInt(i));
+      fingerprint |= 1n << BigInt(i);
     }
   }
 

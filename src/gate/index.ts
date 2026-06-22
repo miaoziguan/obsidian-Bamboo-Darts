@@ -24,11 +24,7 @@ const WARN_BLOCK_THRESHOLD = 3;
 
 type NamedRule = { name: string; check: GateResult };
 
-function collect(
-  rule: NamedRule,
-  reasons: string[],
-  warnings: string[]
-): void {
+function collect(rule: NamedRule, reasons: string[], warnings: string[]): void {
   const { name, check } = rule;
   if (check.status === 'block') {
     reasons.push(`[${name}] ${check.reason}`);
@@ -43,19 +39,73 @@ function buildSummary(reasons: string[]): string {
   return `${reasons[0]}（另有 ${reasons.length - 1} 个问题）`;
 }
 
-export function runGateChecks(
-  content: string,
-  profileConfig?: ProfileConfig
-): GateCheckResult {
+export function runGateChecks(content: string, profileConfig?: ProfileConfig): GateCheckResult {
   const reasons: string[] = [];
   const warnings: string[] = [];
 
   // ── 廉价组：始终执行 ──
-  collect({ name: '长度', check: checkLength(content, profileConfig?.gateMinLength, profileConfig?.gateWarnLength, profileConfig?.gateMaxLength, profileConfig?.gateWarnMaxLength) }, reasons, warnings);
-  collect({ name: '质量', check: checkQuality(content, profileConfig?.gateQualityBlockCount, profileConfig?.gateQualityWarnCount) }, reasons, warnings);
-  collect({ name: 'HTML', check: checkHtmlArtifacts(content, profileConfig?.gateHtmlBlockCount, profileConfig?.gateHtmlWarnCount) }, reasons, warnings);
-  collect({ name: '乱码', check: checkMojibake(content, profileConfig?.gateMojibakeBlockCount, profileConfig?.gateMojibakeWarnCount) }, reasons, warnings);
-  collect({ name: '链接', check: checkLinkDump(content, profileConfig?.gateLinkBlockRatio, profileConfig?.gateLinkBlockDensity) }, reasons, warnings);
+  collect(
+    {
+      name: '长度',
+      check: checkLength(
+        content,
+        profileConfig?.gateMinLength,
+        profileConfig?.gateWarnLength,
+        profileConfig?.gateMaxLength,
+        profileConfig?.gateWarnMaxLength,
+      ),
+    },
+    reasons,
+    warnings,
+  );
+  collect(
+    {
+      name: '质量',
+      check: checkQuality(
+        content,
+        profileConfig?.gateQualityBlockCount,
+        profileConfig?.gateQualityWarnCount,
+      ),
+    },
+    reasons,
+    warnings,
+  );
+  collect(
+    {
+      name: 'HTML',
+      check: checkHtmlArtifacts(
+        content,
+        profileConfig?.gateHtmlBlockCount,
+        profileConfig?.gateHtmlWarnCount,
+      ),
+    },
+    reasons,
+    warnings,
+  );
+  collect(
+    {
+      name: '乱码',
+      check: checkMojibake(
+        content,
+        profileConfig?.gateMojibakeBlockCount,
+        profileConfig?.gateMojibakeWarnCount,
+      ),
+    },
+    reasons,
+    warnings,
+  );
+  collect(
+    {
+      name: '链接',
+      check: checkLinkDump(
+        content,
+        profileConfig?.gateLinkBlockRatio,
+        profileConfig?.gateLinkBlockDensity,
+      ),
+    },
+    reasons,
+    warnings,
+  );
 
   // ── 昂贵组：无阻断时执行 ──
   if (reasons.length === 0) {
@@ -66,9 +116,32 @@ export function runGateChecks(
     const maxNoise = profileConfig?.gateMaxNoiseRatio;
     const warnNoise = profileConfig?.gateWarnNoiseRatio;
 
-    collect({ name: '堆砌', check: checkKeywordStuffing(content, tokenMap, profileConfig?.gateKeywordStuffingBlockRate, profileConfig?.gateKeywordStuffingWarnRate, profileConfig?.gateKeywordStuffingMinLength, profileConfig?.gateKeywordStuffingMinCount, profileConfig?.gateKeywordStuffingTopN) }, reasons, warnings);
-    collect({ name: '密度', check: checkDensity(content, tokenMap, minDensity, warnDensity) }, reasons, warnings);
-    collect({ name: '噪声', check: checkNoiseRatio(content, maxNoise, warnNoise) }, reasons, warnings);
+    collect(
+      {
+        name: '堆砌',
+        check: checkKeywordStuffing(
+          content,
+          tokenMap,
+          profileConfig?.gateKeywordStuffingBlockRate,
+          profileConfig?.gateKeywordStuffingWarnRate,
+          profileConfig?.gateKeywordStuffingMinLength,
+          profileConfig?.gateKeywordStuffingMinCount,
+          profileConfig?.gateKeywordStuffingTopN,
+        ),
+      },
+      reasons,
+      warnings,
+    );
+    collect(
+      { name: '密度', check: checkDensity(content, tokenMap, minDensity, warnDensity) },
+      reasons,
+      warnings,
+    );
+    collect(
+      { name: '噪声', check: checkNoiseRatio(content, maxNoise, warnNoise) },
+      reasons,
+      warnings,
+    );
   }
 
   // ── 警告累积升级 ──

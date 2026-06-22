@@ -12,13 +12,16 @@ export class InputModal extends Modal {
   private onSubmit: (value: string) => void;
   private value: string = '';
 
-  constructor(app: App, options: {
-    title: string;
-    placeholder?: string;
-    submitText?: string;
-    value?: string;
-    onSubmit: (value: string) => void;
-  }) {
+  constructor(
+    app: App,
+    options: {
+      title: string;
+      placeholder?: string;
+      submitText?: string;
+      value?: string;
+      onSubmit: (value: string) => void;
+    },
+  ) {
     super(app);
     this.title = options.title;
     this.placeholder = options.placeholder || '';
@@ -35,40 +38,34 @@ export class InputModal extends Modal {
 
     let inputValue = this.value;
 
-    new Setting(contentEl)
-      .setName('输入')
-      .addText(text => {
-        text
-          .setPlaceholder(this.placeholder)
-          .setValue(this.value)
-          .onChange(value => {
-            inputValue = value;
-          });
-
-        // 回车提交
-        text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
-          if (e.key === 'Enter') {
-            this.onSubmit(inputValue);
-            this.close();
-          }
+    new Setting(contentEl).setName('输入').addText((text) => {
+      text
+        .setPlaceholder(this.placeholder)
+        .setValue(this.value)
+        .onChange((value) => {
+          inputValue = value;
         });
+
+      // 回车提交
+      text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+          this.onSubmit(inputValue);
+          this.close();
+        }
       });
+    });
 
     new Setting(contentEl)
-      .addButton(btn =>
+      .addButton((btn) =>
         btn
           .setButtonText(this.submitText)
           .setCta()
           .onClick(() => {
             this.onSubmit(inputValue);
             this.close();
-          })
+          }),
       )
-      .addButton(btn =>
-        btn
-          .setButtonText('取消')
-          .onClick(() => this.close())
-      );
+      .addButton((btn) => btn.setButtonText('取消').onClick(() => this.close()));
   }
 
   onClose() {

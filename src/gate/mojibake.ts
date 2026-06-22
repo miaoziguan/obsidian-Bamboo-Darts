@@ -18,7 +18,7 @@ const MOJIBAKE_WARN_COUNT = 1;
 export function checkMojibake(
   content: string,
   blockCount: number = MOJIBAKE_BLOCK_COUNT,
-  warnCount: number = MOJIBAKE_WARN_COUNT
+  warnCount: number = MOJIBAKE_WARN_COUNT,
 ): GateResult {
   let totalHits = 0;
   const found: string[] = [];

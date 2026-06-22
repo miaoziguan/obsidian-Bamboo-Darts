@@ -62,12 +62,11 @@ function stripFrontmatter(content: string): string {
 
 // ─── Core Functions ───
 
-
 /** Build similarity matrix for all notes in the vault */
 export async function buildSimilarityMatrix(
   vault: Vault,
   targetFolder?: string,
-  cacheManager: DiscoveryCacheManager = defaultCacheManager
+  cacheManager: DiscoveryCacheManager = defaultCacheManager,
 ): Promise<{ notes: NoteMeta[]; matrix: number[][] }> {
   // Return cached if valid
   const cached = cacheManager.getDiscovery();
@@ -78,7 +77,7 @@ export async function buildSimilarityMatrix(
   const notes: NoteMeta[] = [];
   const allFiles = vault.getMarkdownFiles();
   const files = targetFolder
-    ? allFiles.filter(f => f.path === targetFolder || f.path.startsWith(targetFolder + '/'))
+    ? allFiles.filter((f) => f.path === targetFolder || f.path.startsWith(targetFolder + '/'))
     : allFiles;
 
   // Bug #18 修复：分批读取文件，避免内存飙升
@@ -86,18 +85,18 @@ export async function buildSimilarityMatrix(
   for (let i = 0; i < limit; i += DEDUP_BATCH_SIZE) {
     const batch = files.slice(i, i + DEDUP_BATCH_SIZE);
     const batchNotes = await Promise.all(
-      batch.map(async file => {
+      batch.map(async (file) => {
         const raw = await vault.read(file);
         const content = stripFrontmatter(raw);
         const title = file.path.split('/').pop()!.replace(/\.md$/, '');
         return { path: file.path, title, content };
-      })
+      }),
     );
     notes.push(...batchNotes);
   }
 
   // Build keyword sets
-  const keywordSets = notes.map(n => extractKeywordSet(n.content));
+  const keywordSets = notes.map((n) => extractKeywordSet(n.content));
 
   // Build similarity matrix (symmetric: 只计算上三角，然后镜像，计算量减半)
   const matrix: number[][] = [];

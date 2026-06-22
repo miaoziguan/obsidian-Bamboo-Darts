@@ -1,5 +1,26 @@
 # Bamboo Darts 更新日志
 
+## v2.0.0 (2026-06-22)
+
+### 架构重构与工程优化
+
+五步技术债路线图全部完成，代码可维护性和工程质量大幅提升。
+
+- **ESLint + Prettier**：配置 ESLint 8 + Prettier，统一代码风格，零 error 基线
+- **ExtractionService 拆分**：从 `main.ts` 提取 `ExtractionService` 类（`src/services/extraction-service.ts`），提炼编排独立为服务层，构造注入配置，每次调用传入设置快照避免过期
+- **DOMParser 替换正则 HTML**：`url-extractor.ts` 全面使用 DOMParser + querySelector 替代正则解析 HTML，122 个选择器覆盖导航/广告/推荐/社交/版权/隐藏元素；修复 `[class*=]` 死选择器从未生效的 bug
+- **ResultViewModel 重构**：`result-modal.ts` 状态与业务逻辑提取到 `ResultViewModel`（`src/ui/result-view-model.ts`），Modal 退化为纯视图层，71 个 ViewModel 单测，总测试数 294
+- **CI + 增量覆盖率门禁**：V8 覆盖率配置 + `check-incremental-coverage.mjs` 脚本 + GitHub Actions CI workflow（lint + test + 增量覆盖率 ≥ 60%）
+
+---
+
+## v1.3.8 (2026-06-22)
+
+### 热修复
+- 修复 IdfTable 解构 Bug 导致提炼崩溃：`const { idf: idfTable } = idfResult` 将 Map 解构为 IdfTable，导致 `idfTable.idf.get()` 抛出 `Cannot read properties of undefined`
+
+---
+
 ## v1.3.7 (2026-06-22)
 
 ### 深度代码审计 & 修复

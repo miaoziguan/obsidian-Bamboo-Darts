@@ -5,10 +5,10 @@
 
 import { Modal, App, Setting } from 'obsidian';
 import { AtomicNote } from '../utils/notes-standards';
-import { ExtractionResult, PendingDuplicate } from '../extractor';
-import { ReviewResult, scoreGrade } from '../review/note-reviewer';
-import { PROFILE_LABELS, ContentProfile } from '../extraction/profiles';
-import { DedupResult, DuplicateInfo } from '../deduplicator';
+import { ExtractionResult } from '../extractor';
+import { scoreGrade } from '../review/note-reviewer';
+import { DedupResult } from '../deduplicator';
+import { ResultViewModel, FilterMode } from './result-view-model';
 
 /** 步骤状态对应的颜色 */
 const STEP_COLORS: Record<string, string> = {
@@ -23,24 +23,19 @@ const STEP_ICONS: Record<string, string> = {
 };
 
 export class ResultModal extends Modal {
-  private result: ExtractionResult;
-  private dedupResult?: DedupResult;
+  private vm: ResultViewModel;
   private onSave: (notes: AtomicNote[]) => Promise<void>;
-  private selectedNotes: Set<number> = new Set();
   private countEl: HTMLElement | null = null;
   private _toggleBtn: HTMLButtonElement | null = null;
-  /** 用户从去重详情中恢复的批内重复索引 */
-  private restoredCrossBatch: Set<number> = new Set();
 
   constructor(
     app: App,
     result: ExtractionResult,
     dedupResult?: DedupResult,
-    onSave?: (notes: AtomicNote[]) => Promise<void>
+    onSave?: (notes: AtomicNote[]) => Promise<void>,
   ) {
     super(app);
-    this.result = result;
-    this.dedupResult = dedupResult;
+    this.vm = new ResultViewModel(result, dedupResult);
     this.onSave = onSave || (async () => {});
   }
 
@@ -51,7 +46,7 @@ export class ResultModal extends Modal {
     contentEl.createEl('h2', { text: '原子笔记提炼结果' });
 
     // 显示检测到的策略徽标
-    if (this.result.detectedProfile) {
+    if (this.vm.profileLabel) {
       const badge = contentEl.createEl('div', {
         cls: 'atomic-notes-profile-badge',
       });
@@ -62,20 +57,18 @@ export class ResultModal extends Modal {
       badge.style.background = 'var(--background-modifier-hover)';
       badge.style.color = 'var(--text-muted)';
       badge.style.marginBottom = '8px';
-      const profileName = PROFILE_LABELS[this.result.detectedProfile] || this.result.detectedProfile;
-      const sourceLabel = this.result.profileSource === 'auto' ? '自动检测' : '手动指定';
-      badge.textContent = `策略: ${profileName} (${sourceLabel})`;
+      badge.textContent = this.vm.profileLabel;
     }
 
     this.renderSteps(contentEl);
 
     // 门控警告提示栏（仅提炼成功时显示）
-    if (this.result.success && this.result.gateWarnings && this.result.gateWarnings.length > 0) {
+    if (this.vm.result.success && this.vm.result.gateWarnings && this.vm.result.gateWarnings.length > 0) {
       this.renderGateWarnings(contentEl);
     }
 
     // 语义去重跳过提示（向量索引构建中）
-    if (this.result.semanticDedupSkipped) {
+    if (this.vm.result.semanticDedupSkipped) {
       const box = contentEl.createEl('div', {
         attr: {
           style: [
@@ -93,26 +86,24 @@ export class ResultModal extends Modal {
       box.createEl('span', { text: '向量索引构建中，本次未启用语义去重。仅使用本地算法比对。' });
     }
 
-    if (this.result.success && this.result.notes) {
-      this.selectedNotes = new Set(this.result.notes.map((_, i) => i));
-
-      if (this.dedupResult) {
+    if (this.vm.result.success && this.vm.result.notes) {
+      if (this.vm.dedupResult) {
         this.renderDedupReport(contentEl);
       }
 
-      if (this.result.crossBatchDuplicates && this.result.crossBatchDuplicates.length > 0) {
+      if (this.vm.result.crossBatchDuplicates && this.vm.result.crossBatchDuplicates.length > 0) {
         this.renderCrossBatchDetails(contentEl);
       }
 
-      if (this.result.vaultDedupPending && this.result.vaultDedupPending.length > 0) {
+      if (this.vm.result.vaultDedupPending && this.vm.result.vaultDedupPending.length > 0) {
         this.renderPendingDuplicates(contentEl);
       }
 
-      if (this.result.verificationSummary) {
+      if (this.vm.result.verificationSummary) {
         this.renderVerificationSummary(contentEl);
       }
 
-      if (this.result.reviewDetails && this.result.reviewDetails.length > 0) {
+      if (this.vm.result.reviewDetails && this.vm.result.reviewDetails.length > 0) {
         this.renderReviewSummary(contentEl);
       }
 
@@ -120,8 +111,8 @@ export class ResultModal extends Modal {
     } else {
       const errEl = contentEl.createEl('p', { cls: 'atomic-notes-error' });
       errEl.createEl('strong', { text: '提炼失败：' });
-      if (this.result.error?.includes('[诊断]')) {
-        const pre = errEl.createEl('pre', { cls: 'atomic-notes-diag', text: this.result.error });
+      if (this.vm.result.error?.includes('[诊断]')) {
+        const pre = errEl.createEl('pre', { cls: 'atomic-notes-diag', text: this.vm.result.error });
         pre.style.whiteSpace = 'pre-wrap';
         pre.style.wordWrap = 'break-word';
         pre.style.maxHeight = '400px';
@@ -132,7 +123,7 @@ export class ResultModal extends Modal {
         pre.style.borderRadius = '6px';
         pre.style.marginTop = '8px';
       } else {
-        errEl.appendText(this.result.error || '');
+        errEl.appendText(this.vm.result.error || '');
       }
     }
 
@@ -146,7 +137,7 @@ export class ResultModal extends Modal {
 
     const timeline = container.createEl('div', { cls: 'atomic-notes-timeline' });
 
-    for (const step of this.result.steps) {
+    for (const step of this.vm.result.steps) {
       const item = timeline.createEl('div', { cls: 'atomic-notes-timeline-item' });
 
       // 状态圆点
@@ -162,7 +153,7 @@ export class ResultModal extends Modal {
 
   /** 门控警告栏（黄色提示，不阻断） */
   private renderGateWarnings(container: HTMLElement) {
-    const warnings = this.result.gateWarnings;
+    const warnings = this.vm.result.gateWarnings;
     if (!warnings || warnings.length === 0) return;
 
     const box = container.createEl('div', {
@@ -182,14 +173,16 @@ export class ResultModal extends Modal {
     });
     titleRow.createEl('span', { text: '⚠️', attr: { style: 'font-size:13px' } });
     titleRow.createEl('span', {
-      text: this.result.forceExtracted
+      text: this.vm.result.forceExtracted
         ? `质量提醒（${warnings.length} 条，已跳过门控）`
         : `门控警告（${warnings.length} 条，不影响提炼结果）`,
       attr: { style: 'font-weight:600;font-size:12px;color:var(--color-orange)' },
     });
 
     const list = box.createEl('ul', {
-      attr: { style: 'margin:0;padding-left:18px;font-size:12px;color:var(--text-muted);line-height:1.7' },
+      attr: {
+        style: 'margin:0;padding-left:18px;font-size:12px;color:var(--text-muted);line-height:1.7',
+      },
     });
     for (const w of warnings) {
       list.createEl('li', { text: w });
@@ -197,7 +190,7 @@ export class ResultModal extends Modal {
   }
 
   private renderDedupReport(container: HTMLElement) {
-    if (!this.dedupResult) return;
+    if (!this.vm.dedupResult) return;
 
     const reportEl = container.createEl('div', { cls: 'atomic-notes-dedup-report' });
     reportEl.createEl('div', { text: '去重报告', cls: 'atomic-notes-section-header' });
@@ -208,17 +201,17 @@ export class ResultModal extends Modal {
       attr: { style: 'font-size:12px;color:var(--text-faint);margin-bottom:8px' },
     });
 
-    if (this.dedupResult.duplicates.length === 0) {
+    if (this.vm.dedupResult.duplicates.length === 0) {
       reportEl.createEl('p', {
         text: '✅ 未检测到与知识库重复的笔记',
         attr: { style: 'color:var(--text-muted)' },
       });
     } else {
       reportEl.createEl('p', {
-        text: `检测到 ${this.dedupResult.duplicates.length} 条可能重复的笔记：`,
+        text: `检测到 ${this.vm.dedupResult.duplicates.length} 条可能重复的笔记：`,
       });
       const dupList = reportEl.createEl('ul');
-      for (const dup of this.dedupResult.duplicates) {
+      for (const dup of this.vm.dedupResult.duplicates) {
         const sim = (dup.similarity * 100).toFixed(1);
         let detail = `相似度：${sim}%`;
         // 显示分解：本地 X% / 语义 Y%
@@ -229,21 +222,19 @@ export class ResultModal extends Modal {
         } else {
           detail += `（本地）`;
         }
-        dupList.createEl('li').setText(
-          `${detail} | 匹配：${dup.matchedNote || '未知'}`
-        );
+        dupList.createEl('li').setText(`${detail} | 匹配：${dup.matchedNote || '未知'}`);
       }
     }
 
     reportEl.createEl('p', {
-      text: `最终保存 ${this.dedupResult.uniqueNotes.length} 条笔记`,
+      text: `最终保存 ${this.vm.dedupResult.uniqueNotes.length} 条笔记`,
       attr: { style: 'font-weight:600;color:var(--text-accent)' },
     });
   }
 
   /** 批内去重详情（可折叠，支持手动恢复） */
   private renderCrossBatchDetails(container: HTMLElement) {
-    const dups = this.result.crossBatchDuplicates;
+    const dups = this.vm.result.crossBatchDuplicates;
     if (!dups || dups.length === 0) return;
 
     const section = container.createEl('div', { cls: 'atomic-notes-cross-dedup' });
@@ -251,7 +242,8 @@ export class ResultModal extends Modal {
     // 折叠头部
     const header = section.createEl('div', {
       attr: {
-        style: 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 0;user-select:none',
+        style:
+          'display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 0;user-select:none',
       },
     });
     const arrow = header.createEl('span', {
@@ -268,7 +260,10 @@ export class ResultModal extends Modal {
     });
 
     const detailContainer = section.createEl('div', {
-      attr: { style: 'display:none;border-left:3px solid var(--background-modifier-border);padding-left:12px;margin-top:8px' },
+      attr: {
+        style:
+          'display:none;border-left:3px solid var(--background-modifier-border);padding-left:12px;margin-top:8px',
+      },
     });
 
     let isOpen = false;
@@ -286,7 +281,8 @@ export class ResultModal extends Modal {
       const dup = dups[i];
       const card = detailContainer.createEl('div', {
         attr: {
-          style: 'border:1px solid var(--background-modifier-border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--background-secondary)',
+          style:
+            'border:1px solid var(--background-modifier-border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--background-secondary)',
         },
       });
 
@@ -294,7 +290,9 @@ export class ResultModal extends Modal {
       const simPercent = (dup.similarity * 100).toFixed(1);
       card.createEl('div', {
         text: `相似度 ${simPercent}%`,
-        attr: { style: 'font-size:12px;color:var(--text-accent);font-weight:600;margin-bottom:4px' },
+        attr: {
+          style: 'font-size:12px;color:var(--text-accent);font-weight:600;margin-bottom:4px',
+        },
       });
 
       // 被删笔记
@@ -307,7 +305,8 @@ export class ResultModal extends Modal {
         text: dup.removedTitle,
         attr: { style: 'font-size:12px' },
       });
-      const removedPreview = dup.removedContent.slice(0, 120) + (dup.removedContent.length > 120 ? '...' : '');
+      const removedPreview =
+        dup.removedContent.slice(0, 120) + (dup.removedContent.length > 120 ? '...' : '');
       card.createEl('div', {
         text: removedPreview,
         attr: { style: 'font-size:11px;color:var(--text-muted);margin-bottom:6px' },
@@ -331,7 +330,7 @@ export class ResultModal extends Modal {
       }
 
       // 恢复按钮
-      if (this.restoredCrossBatch.has(i)) {
+      if (this.vm.restoredCrossBatch.has(i)) {
         const restoredLabel = card.createEl('span', {
           text: '已恢复',
           attr: { style: 'font-size:11px;color:var(--text-muted);font-style:italic' },
@@ -343,7 +342,7 @@ export class ResultModal extends Modal {
           attr: { style: 'font-size:11px;padding:2px 10px;cursor:pointer' },
         });
         restoreBtn.addEventListener('click', () => {
-          this.restoreCrossBatchNote(dup, i);
+          this.restoreCrossBatchNote(i);
           card.style.opacity = '0.6';
           restoreBtn.detach();
           card.createEl('span', {
@@ -356,18 +355,8 @@ export class ResultModal extends Modal {
   }
 
   /** 将被合并的笔记恢复为独立笔记 */
-  private restoreCrossBatchNote(dup: DuplicateInfo, index: number) {
-    if (!this.result.notes) return;
-    const note: AtomicNote = {
-      title: dup.removedTitle,
-      content: dup.removedContent,
-      tags: [],
-      createdAt: new Date().toISOString(),
-    };
-    const newIdx = this.result.notes.length;
-    this.result.notes.push(note);
-    this.selectedNotes.add(newIdx);
-    this.restoredCrossBatch.add(index);
+  private restoreCrossBatchNote(index: number) {
+    this.vm.restoreCrossBatchNote(index);
     this.updateSelectionCount();
 
     // 更新笔记列表（仅刷新卡片，保留搜索/筛选状态）
@@ -394,18 +383,21 @@ export class ResultModal extends Modal {
 
   /** 疑似重复确认 UI（中相似度 60-80%） */
   private renderPendingDuplicates(container: HTMLElement) {
-    const pending = this.result.vaultDedupPending;
+    const pending = this.vm.result.vaultDedupPending;
     if (!pending || pending.length === 0) return;
 
     // 清理旧的重渲染内容（防止点击"全部保留/丢弃"后重复插入）
     const existingSection = container.querySelector('.atomic-notes-pending-dedup');
     if (existingSection) existingSection.remove();
 
-    const highCount = pending.filter(p => p.highSimilarity).length;
+    const highCount = pending.filter((p) => p.highSimilarity).length;
     const midCount = pending.length - highCount;
 
     const section = container.createEl('div', { cls: 'atomic-notes-pending-dedup' });
-    section.createEl('div', { text: '⚠️ 疑似重复笔记（需确认）', cls: 'atomic-notes-section-header' });
+    section.createEl('div', {
+      text: '⚠️ 疑似重复笔记（需确认）',
+      cls: 'atomic-notes-section-header',
+    });
 
     // 按相似度分组说明
     const descParts: string[] = [];
@@ -448,7 +440,8 @@ export class ResultModal extends Modal {
         text: item.newNoteTitle,
         attr: { style: 'font-size:13px' },
       });
-      const newPreview = item.newNoteContent.slice(0, 120) + (item.newNoteContent.length > 120 ? '...' : '');
+      const newPreview =
+        item.newNoteContent.slice(0, 120) + (item.newNoteContent.length > 120 ? '...' : '');
       card.createEl('div', {
         text: newPreview,
         attr: { style: 'font-size:12px;color:var(--text-muted);margin:4px 0 8px' },
@@ -479,7 +472,7 @@ export class ResultModal extends Modal {
         attr: { style: 'font-size:12px;padding:4px 12px;cursor:pointer' },
       });
       keepBtn.addEventListener('click', () => {
-        this.selectedNotes.add(item.newNoteIndex);
+        this.vm.keepPendingNote(item.newNoteIndex);
         card.style.opacity = '0.5';
         keepBtn.setText('已保留');
         keepBtn.setAttribute('disabled', 'true');
@@ -492,7 +485,7 @@ export class ResultModal extends Modal {
         attr: { style: 'font-size:12px;padding:4px 12px;cursor:pointer' },
       });
       discardBtn.addEventListener('click', () => {
-        this.selectedNotes.delete(item.newNoteIndex);
+        this.vm.discardPendingNote(item.newNoteIndex);
         card.style.opacity = '0.5';
         discardBtn.setText('已丢弃');
         discardBtn.setAttribute('disabled', 'true');
@@ -510,9 +503,7 @@ export class ResultModal extends Modal {
       attr: { style: 'font-size:12px;padding:4px 12px;cursor:pointer' },
     });
     keepAllBtn.addEventListener('click', () => {
-      for (const item of pending) {
-        this.selectedNotes.add(item.newNoteIndex);
-      }
+      this.vm.keepAllPending();
       this.renderPendingDuplicates(container);
       this.updateSelectionCount();
     });
@@ -522,16 +513,14 @@ export class ResultModal extends Modal {
       attr: { style: 'font-size:12px;padding:4px 12px;cursor:pointer' },
     });
     discardAllBtn.addEventListener('click', () => {
-      for (const item of pending) {
-        this.selectedNotes.delete(item.newNoteIndex);
-      }
+      this.vm.discardAllPending();
       this.renderPendingDuplicates(container);
       this.updateSelectionCount();
     });
   }
 
   private renderVerificationSummary(container: HTMLElement) {
-    const summary = this.result.verificationSummary;
+    const summary = this.vm.result.verificationSummary;
     if (!summary) return;
 
     const el = container.createEl('div');
@@ -560,20 +549,21 @@ export class ResultModal extends Modal {
 
   /** 3.1 复查评分结果展示（默认折叠） */
   private renderReviewSummary(container: HTMLElement) {
-    const details = this.result.reviewDetails;
+    const details = this.vm.result.reviewDetails;
     if (!details || details.length === 0) return;
 
     const section = container.createEl('div');
 
     // 统计概览
-    const kept = details.filter(d => d.verdict === '保留');
-    const discarded = details.filter(d => d.verdict === '丢弃');
-    const avgScore = details.reduce((s, d) => s + d.finalScore, 0) / details.length;
+    const stats = this.vm.reviewStats!;
+    const kept = details.filter((d) => d.verdict === '保留');
+    const discarded = details.filter((d) => d.verdict === '丢弃');
 
     // 折叠头部（始终可见）
     const header = section.createEl('div', {
       attr: {
-        style: 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 0;user-select:none;border-top:1px solid var(--background-modifier-border)',
+        style:
+          'display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 0;user-select:none;border-top:1px solid var(--background-modifier-border)',
       },
     });
     const arrow = header.createEl('span', {
@@ -585,7 +575,7 @@ export class ResultModal extends Modal {
       attr: { style: 'font-weight:600;font-size:13px' },
     });
     header.createEl('span', {
-      text: `均分 ${avgScore.toFixed(1)} · 合格 ${kept.length}${discarded.length > 0 ? ` · 不合 ${discarded.length}` : ''}`,
+      text: `均分 ${stats.avgScore.toFixed(1)} · 合格 ${kept.length}${discarded.length > 0 ? ` · 不合 ${discarded.length}` : ''}`,
       attr: { style: 'font-size:12px;color:var(--text-muted)' },
     });
     const hintEl = header.createEl('span', {
@@ -595,7 +585,10 @@ export class ResultModal extends Modal {
 
     // 折叠内容
     const body = section.createEl('div', {
-      attr: { style: 'display:none;border-left:3px solid var(--background-modifier-border);padding-left:12px;margin-top:8px' },
+      attr: {
+        style:
+          'display:none;border-left:3px solid var(--background-modifier-border);padding-left:12px;margin-top:8px',
+      },
     });
 
     let isOpen = false;
@@ -607,11 +600,22 @@ export class ResultModal extends Modal {
     });
 
     // 评分概要（展开后可见）
-    const summaryRow = body.createEl('div', { attr: { style: 'display:flex;gap:12px;margin-bottom:8px;font-size:13px' } });
-    summaryRow.createEl('span', { text: `均分 ${avgScore.toFixed(1)}`, attr: { style: 'color:var(--text-accent);font-weight:600' } });
-    summaryRow.createEl('span', { text: `合格 ${kept.length}`, attr: { style: 'color:var(--color-green)' } });
+    const summaryRow = body.createEl('div', {
+      attr: { style: 'display:flex;gap:12px;margin-bottom:8px;font-size:13px' },
+    });
+    summaryRow.createEl('span', {
+      text: `均分 ${stats.avgScore.toFixed(1)}`,
+      attr: { style: 'color:var(--text-accent);font-weight:600' },
+    });
+    summaryRow.createEl('span', {
+      text: `合格 ${kept.length}`,
+      attr: { style: 'color:var(--color-green)' },
+    });
     if (discarded.length > 0) {
-      summaryRow.createEl('span', { text: `不合 ${discarded.length}`, attr: { style: 'color:var(--color-red)' } });
+      summaryRow.createEl('span', {
+        text: `不合 ${discarded.length}`,
+        attr: { style: 'color:var(--color-red)' },
+      });
     }
 
     // 逐条评分（紧凑表格）
@@ -623,13 +627,18 @@ export class ResultModal extends Modal {
     for (const h of ['#', '标题', '洞见', '知识', '总分', '等级', '判定']) {
       headerRow.createEl('th', {
         text: h,
-        attr: { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--background-modifier-border);color:var(--text-muted);font-weight:600' },
+        attr: {
+          style:
+            'text-align:left;padding:4px 6px;border-bottom:1px solid var(--background-modifier-border);color:var(--text-muted);font-weight:600',
+        },
       });
     }
 
     const tbody = table.createEl('tbody');
     for (const d of details) {
-      const note = d.title ? this.result.notes.find(n => n.title === d.title) : this.result.notes[d.index];
+      const note = d.title
+        ? this.vm.result.notes.find((n) => n.title === d.title)
+        : this.vm.result.notes[d.index];
       const isDiscard = d.verdict === '丢弃';
       const tr = tbody.createEl('tr', {
         attr: { style: isDiscard ? 'opacity:0.5' : '' },
@@ -637,10 +646,19 @@ export class ResultModal extends Modal {
       tr.createEl('td', { text: String(d.index + 1), attr: { style: 'padding:3px 6px' } });
       tr.createEl('td', {
         text: note?.title ?? '(未知)',
-        attr: { style: 'padding:3px 6px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
+        attr: {
+          style:
+            'padding:3px 6px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',
+        },
       });
-      tr.createEl('td', { text: String(d.insightScore), attr: { style: 'padding:3px 6px;text-align:center' } });
-      tr.createEl('td', { text: String(d.knowledgeScore), attr: { style: 'padding:3px 6px;text-align:center' } });
+      tr.createEl('td', {
+        text: String(d.insightScore),
+        attr: { style: 'padding:3px 6px;text-align:center' },
+      });
+      tr.createEl('td', {
+        text: String(d.knowledgeScore),
+        attr: { style: 'padding:3px 6px;text-align:center' },
+      });
       const grade = scoreGrade(d.finalScore);
       tr.createEl('td', {
         text: String(d.finalScore),
@@ -652,43 +670,11 @@ export class ResultModal extends Modal {
       });
       tr.createEl('td', {
         text: d.verdict,
-        attr: { style: `padding:3px 6px;color:${isDiscard ? 'var(--color-red)' : 'var(--color-green)'}` },
+        attr: {
+          style: `padding:3px 6px;color:${isDiscard ? 'var(--color-red)' : 'var(--color-green)'}`,
+        },
       });
     }
-  }
-
-  /** 当前筛选状态 */
-  private filterMode: 'all' | 'issues' | 'traced' = 'all';
-  /** 当前搜索关键词 */
-  private searchQuery = '';
-  /** 筛选后可见的笔记索引列表 */
-  private visibleIndices: number[] = [];
-
-  /** 判断笔记是否属于"有问题"（需对比或超源） */
-  private noteHasIssues(i: number): boolean {
-    const note = this.result.notes[i];
-    return (note.needsCompareCount ?? 0) > 0 || (note.outOfScopeCount ?? 0) > 0;
-  }
-
-  /** 判断笔记是否属于"已溯源"（有溯源且无问题） */
-  private noteIsTraced(i: number): boolean {
-    const note = this.result.notes[i];
-    return (note.tracedCount ?? 0) > 0 && (note.needsCompareCount ?? 0) === 0 && (note.outOfScopeCount ?? 0) === 0;
-  }
-
-  /** 笔记是否匹配当前筛选条件 */
-  private noteMatchesFilter(i: number): boolean {
-    if (this.filterMode === 'issues') return this.noteHasIssues(i);
-    if (this.filterMode === 'traced') return this.noteIsTraced(i);
-    return true; // 'all'
-  }
-
-  /** 笔记是否匹配搜索关键词 */
-  private noteMatchesSearch(i: number): boolean {
-    if (!this.searchQuery) return true;
-    const note = this.result.notes[i];
-    const q = this.searchQuery.toLowerCase();
-    return (note.title || '').toLowerCase().includes(q) || (note.content || '').toLowerCase().includes(q);
   }
 
   /** 卡片式笔记列表 */
@@ -697,10 +683,12 @@ export class ResultModal extends Modal {
     this.notesListEl = notesEl;
 
     const headerEl = notesEl.createEl('div', {
-      attr: { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px' },
+      attr: {
+        style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px',
+      },
     });
     headerEl.createEl('h3', {
-      text: `提炼结果（${this.result.notes.length} 条）`,
+      text: `提炼结果（${this.vm.result.notes.length} 条）`,
       attr: { style: 'margin:0' },
     });
 
@@ -710,11 +698,7 @@ export class ResultModal extends Modal {
       attr: { style: 'font-size:11px;padding:2px 8px;cursor:pointer' },
     });
     this._toggleBtn.addEventListener('click', () => {
-      if (this.selectedNotes.size === this.result.notes.length) {
-        this.selectedNotes.clear();
-      } else {
-        this.selectedNotes = new Set(this.result.notes.map((_, i) => i));
-      }
+      this.vm.toggleAll();
       this.updateSelectionCount();
     });
 
@@ -728,7 +712,7 @@ export class ResultModal extends Modal {
       attr: { style: 'display:flex;gap:4px' },
     });
 
-    const filterBtns: { mode: 'all' | 'issues' | 'traced'; label: string }[] = [
+    const filterBtns: { mode: FilterMode; label: string }[] = [
       { mode: 'all', label: '全部' },
       { mode: 'issues', label: '有问题' },
       { mode: 'traced', label: '已溯源' },
@@ -737,24 +721,23 @@ export class ResultModal extends Modal {
     const filterBtnEls: Record<string, HTMLButtonElement> = {};
 
     for (const { mode, label } of filterBtns) {
-      const count = mode === 'all'
-        ? this.result.notes.length
-        : mode === 'issues'
-          ? this.result.notes.filter((_, i) => this.noteHasIssues(i)).length
-          : this.result.notes.filter((_, i) => this.noteIsTraced(i)).length;
+      const counts = this.vm.filterCounts;
+      const count = counts[mode];
 
       const btn = filterGroup.createEl('button', {
         text: `${label}${count > 0 ? ` (${count})` : ''}`,
         attr: {
-          style: `font-size:11px;padding:3px 10px;cursor:pointer;border-radius:6px;border:1px solid var(--background-modifier-border);background:${this.filterMode === mode ? 'var(--interactive-accent)' : 'var(--background-secondary)'};color:${this.filterMode === mode ? 'var(--text-on-accent)' : 'var(--text-muted)'}`,
+          style: `font-size:11px;padding:3px 10px;cursor:pointer;border-radius:6px;border:1px solid var(--background-modifier-border);background:${this.vm.filterMode === mode ? 'var(--interactive-accent)' : 'var(--background-secondary)'};color:${this.vm.filterMode === mode ? 'var(--text-on-accent)' : 'var(--text-muted)'}`,
         },
       });
       btn.addEventListener('click', () => {
-        this.filterMode = mode;
+        this.vm.setFilterMode(mode);
         // 更新筛选按钮样式
         for (const [m, b] of Object.entries(filterBtnEls)) {
           const isActive = m === mode;
-          b.style.background = isActive ? 'var(--interactive-accent)' : 'var(--background-secondary)';
+          b.style.background = isActive
+            ? 'var(--interactive-accent)'
+            : 'var(--background-secondary)';
           b.style.color = isActive ? 'var(--text-on-accent)' : 'var(--text-muted)';
         }
         this.refreshFilteredNotes();
@@ -767,11 +750,12 @@ export class ResultModal extends Modal {
       attr: {
         type: 'text',
         placeholder: '搜索标题或内容...',
-        style: 'flex:1;min-width:120px;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-primary)',
+        style:
+          'flex:1;min-width:120px;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-primary)',
       },
     }) as HTMLInputElement;
     searchInput.addEventListener('input', () => {
-      this.searchQuery = searchInput.value.trim();
+      this.vm.setSearchQuery(searchInput.value.trim());
       this.refreshFilteredNotes();
     });
 
@@ -783,15 +767,15 @@ export class ResultModal extends Modal {
   /** 渲染笔记卡片到指定容器（受筛选和搜索控制） */
   private renderNoteCardsInto(container: HTMLElement) {
     // 计算可见索引
-    this.visibleIndices = [];
-    for (let i = 0; i < this.result.notes.length; i++) {
-      if (this.noteMatchesFilter(i) && this.noteMatchesSearch(i)) {
-        this.visibleIndices.push(i);
+    const visibleIndices: number[] = [];
+    for (let i = 0; i < this.vm.result.notes.length; i++) {
+      if (this.vm.noteMatchesFilter(i) && this.vm.noteMatchesSearch(i)) {
+        visibleIndices.push(i);
       }
     }
 
     // 无结果提示
-    if (this.visibleIndices.length === 0) {
+    if (visibleIndices.length === 0) {
       container.createEl('div', {
         text: '📭 没有匹配的笔记',
         attr: { style: 'color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center' },
@@ -799,8 +783,8 @@ export class ResultModal extends Modal {
       return;
     }
 
-    for (const i of this.visibleIndices) {
-      const note = this.result.notes[i];
+    for (const i of visibleIndices) {
+      const note = this.vm.result.notes[i];
       const card = container.createEl('div', { cls: 'atomic-notes-card' });
 
       // ── 标题行：复选框 + 标题 + 核查徽标 ──
@@ -809,10 +793,10 @@ export class ResultModal extends Modal {
       const checkbox = headerRow.createEl('input', {
         attr: { type: 'checkbox' },
       }) as HTMLInputElement;
-      checkbox.checked = this.selectedNotes.has(i);
+      checkbox.checked = this.vm.selectedNotes.has(i);
       checkbox.addEventListener('change', () => {
-        if (checkbox.checked) this.selectedNotes.add(i);
-        else this.selectedNotes.delete(i);
+        if (checkbox.checked) this.vm.selectedNotes.add(i);
+        else this.vm.selectedNotes.delete(i);
         this.updateSelectionCount();
       });
 
@@ -830,20 +814,32 @@ export class ResultModal extends Modal {
           attr: { style: 'display:inline-flex;gap:4px;margin-left:auto' },
         });
         if (traced > 0) {
-          chipGroup.createEl('span', { cls: 'atomic-notes-verify-chip verified', text: `溯源${traced}` });
+          chipGroup.createEl('span', {
+            cls: 'atomic-notes-verify-chip verified',
+            text: `溯源${traced}`,
+          });
         }
         if (needsCompare > 0) {
-          chipGroup.createEl('span', { cls: 'atomic-notes-verify-chip doubtful', text: `对比${needsCompare}` });
+          chipGroup.createEl('span', {
+            cls: 'atomic-notes-verify-chip doubtful',
+            text: `对比${needsCompare}`,
+          });
         }
         if (outOfScope > 0) {
-          chipGroup.createEl('span', { cls: 'atomic-notes-verify-chip unverified', text: `超源${outOfScope}` });
+          chipGroup.createEl('span', {
+            cls: 'atomic-notes-verify-chip unverified',
+            text: `超源${outOfScope}`,
+          });
         }
       }
 
       // ── 预览（可展开） ──
       const isLong = note.content.length > 200;
       const previewText = isLong ? note.content.slice(0, 200) + '...' : note.content;
-      const previewEl = card.createEl('div', { cls: 'atomic-notes-card-preview', text: previewText });
+      const previewEl = card.createEl('div', {
+        cls: 'atomic-notes-card-preview',
+        text: previewText,
+      });
       if (isLong) {
         previewEl.setAttr('title', '点击展开/收起全文');
         previewEl.style.cursor = 'pointer';
@@ -869,12 +865,16 @@ export class ResultModal extends Modal {
 
         const verifyHeader = verifySection.createEl('div', {
           attr: {
-            style: 'display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;padding:2px 0',
+            style:
+              'display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;padding:2px 0',
           },
         });
         const verifyArrow = verifyHeader.createEl('span', {
           text: '▸',
-          attr: { style: 'font-size:10px;transition:transform 0.2s;display:inline-block;color:var(--text-muted)' },
+          attr: {
+            style:
+              'font-size:10px;transition:transform 0.2s;display:inline-block;color:var(--text-muted)',
+          },
         });
         verifyHeader.createEl('span', {
           text: '核查详情',
@@ -882,7 +882,10 @@ export class ResultModal extends Modal {
         });
 
         const verifyBody = verifySection.createEl('div', {
-          attr: { style: 'display:none;margin-top:6px;border-left:2px solid var(--background-modifier-border);padding-left:10px' },
+          attr: {
+            style:
+              'display:none;margin-top:6px;border-left:2px solid var(--background-modifier-border);padding-left:10px',
+          },
         });
 
         let verifyOpen = false;
@@ -893,9 +896,9 @@ export class ResultModal extends Modal {
         });
 
         const statusColorMap: Record<string, string> = {
-          '已溯源': 'var(--color-green)',
-          '需对比': 'var(--color-orange)',
-          '超源': 'var(--color-red)',
+          已溯源: 'var(--color-green)',
+          需对比: 'var(--color-orange)',
+          超源: 'var(--color-red)',
         };
 
         for (const item of note.verification) {
@@ -922,7 +925,10 @@ export class ResultModal extends Modal {
           if (item.sourceText) {
             row.createEl('div', {
               text: `📖 ${item.sourceText}`,
-              attr: { style: 'font-size:10px;color:var(--text-muted);margin-top:3px;padding:4px 6px;background:var(--background-secondary);border-radius:4px;line-height:1.4' },
+              attr: {
+                style:
+                  'font-size:10px;color:var(--text-muted);margin-top:3px;padding:4px 6px;background:var(--background-secondary);border-radius:4px;line-height:1.4',
+              },
             });
           }
 
@@ -938,7 +944,9 @@ export class ResultModal extends Modal {
           if (item.reason && !item.sourceText) {
             row.createEl('div', {
               text: item.reason,
-              attr: { style: 'font-size:10px;color:var(--text-faint);margin-top:2px;font-style:italic' },
+              attr: {
+                style: 'font-size:10px;color:var(--text-faint);margin-top:2px;font-style:italic',
+              },
             });
           }
         }
@@ -953,21 +961,7 @@ export class ResultModal extends Modal {
       } else {
         // 无标签笔记 → 综合判断型，颜色由核查结果决定
         const footer = card.createEl('div', { cls: 'atomic-notes-card-footer' });
-        let synthColor = 'var(--text-faint)';   // 默认：无核查数据
-        let synthLabel = '综合判断';
-        const outOfScope = note.outOfScopeCount ?? 0;
-        const needsCompare = note.needsCompareCount ?? 0;
-        const traced = note.tracedCount ?? 0;
-        if (outOfScope > 0) {
-          synthColor = 'var(--color-red)';
-          synthLabel = '综合判断 · 超源';
-        } else if (needsCompare > 0) {
-          synthColor = 'var(--color-orange)';
-          synthLabel = '综合判断 · 需对比';
-        } else if (traced > 0) {
-          synthColor = 'var(--color-green)';
-          synthLabel = '综合判断 · 已溯源';
-        }
+        const { label: synthLabel, color: synthColor } = this.vm.noteSynthLabel(i);
         footer.createEl('span', {
           text: synthLabel,
           attr: {
@@ -980,7 +974,10 @@ export class ResultModal extends Modal {
       const editSection = card.createEl('div', { attr: { style: 'margin-top:8px' } });
       const editBtn = editSection.createEl('button', {
         text: '✎ 编辑',
-        attr: { style: 'font-size:11px;padding:2px 10px;cursor:pointer;background:var(--background-primary);border:1px solid var(--background-modifier-border);border-radius:4px;color:var(--text-muted)' },
+        attr: {
+          style:
+            'font-size:11px;padding:2px 10px;cursor:pointer;background:var(--background-primary);border:1px solid var(--background-modifier-border);border-radius:4px;color:var(--text-muted)',
+        },
       });
       const editPanel = editSection.createEl('div', {
         attr: { style: 'display:none;margin-top:8px' },
@@ -993,23 +990,29 @@ export class ResultModal extends Modal {
           editPanel.empty();
           editPanel.createEl('label', {
             text: '标题',
-            attr: { style: 'font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px' },
+            attr: {
+              style: 'font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px',
+            },
           });
           const titleInput = editPanel.createEl('input', {
             attr: {
               type: 'text',
               value: note.title,
-              style: 'width:100%;font-size:13px;padding:4px 8px;border:1px solid var(--background-modifier-border);border-radius:4px;margin-bottom:8px;box-sizing:border-box',
+              style:
+                'width:100%;font-size:13px;padding:4px 8px;border:1px solid var(--background-modifier-border);border-radius:4px;margin-bottom:8px;box-sizing:border-box',
             },
           }) as HTMLInputElement;
           editPanel.createEl('label', {
             text: '内容',
-            attr: { style: 'font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px' },
+            attr: {
+              style: 'font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px',
+            },
           });
           const contentInput = editPanel.createEl('textarea', {
             text: note.content,
             attr: {
-              style: 'width:100%;min-height:100px;font-size:12px;padding:6px 8px;border:1px solid var(--background-modifier-border);border-radius:4px;margin-bottom:8px;box-sizing:border-box;resize:vertical;font-family:var(--font-text)',
+              style:
+                'width:100%;min-height:100px;font-size:12px;padding:6px 8px;border:1px solid var(--background-modifier-border);border-radius:4px;margin-bottom:8px;box-sizing:border-box;resize:vertical;font-family:var(--font-text)',
             },
           }) as HTMLTextAreaElement;
           const applyBtn = editPanel.createEl('button', {
@@ -1019,16 +1022,7 @@ export class ResultModal extends Modal {
           applyBtn.addEventListener('click', () => {
             const newTitle = titleInput.value.trim() || note.title;
             const newContent = contentInput.value.trim() || note.content;
-            const changed = newTitle !== note.title || newContent !== note.content;
-            note.title = newTitle;
-            note.content = newContent;
-            // 编辑后核查数据不再可靠，标记失效
-            if (changed && note.verification && note.verification.length > 0) {
-              note.verification = [];
-              note.tracedCount = 0;
-              note.needsCompareCount = 0;
-              note.outOfScopeCount = 0;
-            }
+            this.vm.editNote(i, newTitle, newContent);
             isEditing = false;
             editPanel.style.display = 'none';
             editBtn.setText('✎ 编辑');
@@ -1053,41 +1047,41 @@ export class ResultModal extends Modal {
   }
 
   private renderActions(container: HTMLElement) {
-    if (!this.result.success || this.result.notes.length === 0) {
+    if (!this.vm.result.success || this.vm.result.notes.length === 0) {
       // 仅有关闭按钮
-      new Setting(container).addButton(btn =>
-        btn.setButtonText('关闭').onClick(() => this.close())
+      new Setting(container).addButton((btn) =>
+        btn.setButtonText('关闭').onClick(() => this.close()),
       );
       return;
     }
 
     // 选中数量
     this.countEl = container.createEl('p', {
-      text: `已选 ${this.selectedNotes.size} / ${this.result.notes.length} 条`,
+      text: `已选 ${this.vm.selectedNotes.size} / ${this.vm.result.notes.length} 条`,
       attr: { style: 'font-size:12px;color:var(--text-muted);margin:8px 0' },
     });
 
     // 按钮栏
     const bar = container.createEl('div', { cls: 'atomic-notes-action-bar' });
-    bar.createEl('button', { text: '保存选中笔记', cls: 'mod-cta' })
+    bar
+      .createEl('button', { text: '保存选中笔记', cls: 'mod-cta' })
       .addEventListener('click', async () => {
-        const selected = this.result.notes.filter((_, i) => this.selectedNotes.has(i));
+        const selected = this.vm.getSelectedNotes();
         if (selected.length === 0) return;
         await this.onSave(selected);
         this.close();
       });
-    bar.createEl('button', { text: '关闭' })
-      .addEventListener('click', () => {
-        if (this.selectedNotes.size > 0) {
-          if (!confirm(`还有 ${this.selectedNotes.size} 条笔记未保存，确定关闭？`)) return;
-        }
-        this.close();
-      });
+    bar.createEl('button', { text: '关闭' }).addEventListener('click', () => {
+      if (this.vm.selectedNotes.size > 0) {
+        if (!confirm(`还有 ${this.vm.selectedNotes.size} 条笔记未保存，确定关闭？`)) return;
+      }
+      this.close();
+    });
   }
 
   private updateSelectionCount() {
     if (this.countEl) {
-      this.countEl.setText(`已选 ${this.selectedNotes.size} / ${this.result.notes.length} 条`);
+      this.countEl.setText(`已选 ${this.vm.selectedNotes.size} / ${this.vm.result.notes.length} 条`);
     }
     this.updateToggleBtn();
   }
@@ -1096,17 +1090,12 @@ export class ResultModal extends Modal {
   private updateToggleBtn() {
     if (!this._toggleBtn) return;
     this._toggleBtn.setText(
-      this.selectedNotes.size === this.result.notes.length ? '取消全选' : '全选'
+      this.vm.selectedNotes.size === this.vm.result.notes.length ? '取消全选' : '全选',
     );
   }
 
   onClose() {
-    // 释放引用，帮助 GC 回收提炼结果对象图
-    this.selectedNotes.clear();
-    this.restoredCrossBatch.clear();
-    this.visibleIndices.length = 0;
-    // result 是只读的，用 any 强置空断开笔记数组引用
-    (this as any).result = null;
+    this.vm.dispose();
 
     const { contentEl } = this;
     contentEl.empty();

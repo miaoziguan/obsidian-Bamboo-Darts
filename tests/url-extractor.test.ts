@@ -61,11 +61,11 @@ describe('extractUrlContent — 噪声块剥离', () => {
 
   it('不误伤 class 中仅词形相近但语义无关的元素', async () => {
     // class="header" 不应被 [class*="ad"] 误杀
-    const html = `<html><body><article>${articleBody}</article><div class="header">页头信息</div></body></html>`;
+    // 注意：div 必须放在 article 内部，否则语义容器选中 article 后，兄弟节点自然不在 textContent 中
+    const html = `<html><body><article>${articleBody}<div class="header">页头信息</div></article></body></html>`;
     const res = await extractUrlContent(html);
     expect(res.success).toBe(true);
-    // 注意：header 标签本身在 NOISE_SELECTORS 里，会被剥离；
-    // 这里测的是 class="header" 的 div，不应因 [class*=ad] 之类规则被误删
+    // class="header" 的 div 不应因 [class*=ad] 之类规则被误删
     expect(res.content).toContain('页头信息');
   });
 });

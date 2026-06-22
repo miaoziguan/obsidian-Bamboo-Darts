@@ -25,7 +25,11 @@ export function computeSourceHash(content: string): string {
 /** Generate a short title for the extraction source */
 export function getSourceTitle(type: string, content: string): string {
   if (type === 'url') {
-    try { return new URL(content).hostname; } catch { return content.slice(0, 50); }
+    try {
+      return new URL(content).hostname;
+    } catch {
+      return content.slice(0, 50);
+    }
   }
   return content.slice(0, 50);
 }
@@ -33,15 +37,15 @@ export function getSourceTitle(type: string, content: string): string {
 /** Check if content has been previously extracted */
 export function findPreviousExtraction(
   history: ExtractionHistoryEntry[],
-  sourceHash: string
+  sourceHash: string,
 ): ExtractionHistoryEntry | undefined {
-  return history.find(entry => entry.sourceHash === sourceHash);
+  return history.find((entry) => entry.sourceHash === sourceHash);
 }
 
 /** Add a new extraction history entry, pruning old ones */
 export function addHistoryEntry(
   history: ExtractionHistoryEntry[],
-  entry: ExtractionHistoryEntry
+  entry: ExtractionHistoryEntry,
 ): ExtractionHistoryEntry[] {
   const updated = [...history, entry];
   return updated.slice(-MAX_HISTORY_SIZE);

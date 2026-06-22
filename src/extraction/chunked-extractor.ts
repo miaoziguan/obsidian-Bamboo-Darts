@@ -101,7 +101,10 @@ export async function extractChunked(
       successCount++;
     } else {
       failCount++;
-      tracker.update({ detail: `${label}：失败 — ${result.error || '未知错误'}`, status: 'failed' });
+      tracker.update({
+        detail: `${label}：失败 — ${result.error || '未知错误'}`,
+        status: 'failed',
+      });
 
       // 连续失败且无任何成功产出，提前中止，避免浪费 API 调用
       if (failCount >= 3 && successCount === 0) break;
@@ -109,7 +112,7 @@ export async function extractChunked(
 
     // 段间延迟
     if (i < chunks.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, CHUNK_DELAY_MS));
+      await new Promise((resolve) => setTimeout(resolve, CHUNK_DELAY_MS));
     }
   }
 

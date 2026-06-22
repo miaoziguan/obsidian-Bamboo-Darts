@@ -7,20 +7,42 @@ const block = (reason: string): GateResult => ({ status: 'block', reason });
 // ─── 广告/低质关键词 ───
 
 const COMMERCIAL_SPAM = [
-  '点击这里', '立即购买', '限时优惠', '抢购',
-  '广告', '推广', '赞助', '点击链接',
+  '点击这里',
+  '立即购买',
+  '限时优惠',
+  '抢购',
+  '广告',
+  '推广',
+  '赞助',
+  '点击链接',
   // 英文广告词
-  'buy now', 'click here', 'limited offer', 'special offer',
-  'order now', 'shop now', 'save big', 'best price',
-  'free trial', 'sign up now', 'subscribe now',
-  '100% free', 'no credit card', 'act now',
+  'buy now',
+  'click here',
+  'limited offer',
+  'special offer',
+  'order now',
+  'shop now',
+  'save big',
+  'best price',
+  'free trial',
+  'sign up now',
+  'subscribe now',
+  '100% free',
+  'no credit card',
+  'act now',
 ];
 
 const LOW_QUALITY_SIGNALS = [
-  '你绝对想不到', '惊呆了', '炸裂',
+  '你绝对想不到',
+  '惊呆了',
+  '炸裂',
   // 英文标题党
-  'you won\'t believe', 'shocking', 'amazing trick',
-  'this one weird trick', 'doctors hate', 'they don\'t want you to know',
+  "you won't believe",
+  'shocking',
+  'amazing trick',
+  'this one weird trick',
+  'doctors hate',
+  "they don't want you to know",
 ];
 
 const AD_VARIANT_PATTERNS: RegExp[] = [
@@ -36,8 +58,8 @@ export function checkQuality(content: string, blockCount?: number, warnCount?: n
   const blockThreshold = blockCount ?? 3;
   const warnThreshold = warnCount ?? 1;
 
-  const matchedAds = COMMERCIAL_SPAM.filter(kw => lower.includes(kw.toLowerCase()));
-  const matchedLowQ = LOW_QUALITY_SIGNALS.filter(kw => lower.includes(kw.toLowerCase()));
+  const matchedAds = COMMERCIAL_SPAM.filter((kw) => lower.includes(kw.toLowerCase()));
+  const matchedLowQ = LOW_QUALITY_SIGNALS.filter((kw) => lower.includes(kw.toLowerCase()));
 
   let variantHits = 0;
   const variantMatches: string[] = [];
@@ -55,13 +77,13 @@ export function checkQuality(content: string, blockCount?: number, warnCount?: n
 
   if (totalHits >= blockThreshold) {
     const allMatches = [...matchedAds, ...matchedLowQ, ...variantMatches];
-    const rateInfo = hitRate >= 0.1 ? `（密度 ${(hitRate).toFixed(1)}/百字）` : '';
+    const rateInfo = hitRate >= 0.1 ? `（密度 ${hitRate.toFixed(1)}/百字）` : '';
     return block(`检测到大量低质信号（${allMatches.join('、')}）${rateInfo}，疑似为广告或营销内容`);
   }
 
   if (totalHits >= warnThreshold) {
     const allMatches = [...matchedAds, ...matchedLowQ, ...variantMatches];
-    const rateInfo = hitRate >= 0.1 ? `（密度 ${(hitRate).toFixed(1)}/百字）` : '';
+    const rateInfo = hitRate >= 0.1 ? `（密度 ${hitRate.toFixed(1)}/百字）` : '';
     return warn(`检测到少量低质信号（${allMatches.join('、')}）${rateInfo}，建议人工确认`);
   }
 
@@ -88,9 +110,7 @@ export function checkKeywordStuffing(
   if (tokenMap.size < 10) return ok();
 
   const contentLen = content.length || 1;
-  const sorted = [...tokenMap.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, topN);
+  const sorted = [...tokenMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN);
 
   const stuffed: Array<{ token: string; rate: number }> = [];
   for (const [token, count] of sorted) {
@@ -104,7 +124,7 @@ export function checkKeywordStuffing(
   if (stuffed.length === 0) return ok();
 
   const maxRate = stuffed[0].rate;
-  const labels = stuffed.map(s => `"${s.token}"(${s.rate.toFixed(1)}/百字)`).join('、');
+  const labels = stuffed.map((s) => `"${s.token}"(${s.rate.toFixed(1)}/百字)`).join('、');
 
   if (maxRate >= blockRate) {
     return block(`关键词堆砌：${labels}，疑似SEO优化内容`);

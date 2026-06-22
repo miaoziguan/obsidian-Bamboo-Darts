@@ -10,7 +10,7 @@ import { Editor } from 'obsidian';
  */
 export function insertBacklinks(
   editor: Editor,
-  notePaths: string[]
+  notePaths: string[],
 ): { success: number; failed: number } {
   let success = 0;
   let failed = 0;
@@ -20,7 +20,10 @@ export function insertBacklinks(
   for (const path of notePaths) {
     try {
       const noteName = path.split('/').pop()!.replace(/\.md$/, '');
-      if (!noteName) { failed++; continue; }
+      if (!noteName) {
+        failed++;
+        continue;
+      }
       const backlink = `\n\n[[${noteName}]]\n`;
       const cursorPos = editor.getCursor();
       editor.replaceRange(backlink, cursorPos);

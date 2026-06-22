@@ -21,7 +21,8 @@ const MSG_BOX = [
 ].join(';');
 
 const BTN_ROW = 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px';
-const BTN_PRIMARY = 'background:var(--interactive-accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600';
+const BTN_PRIMARY =
+  'background:var(--interactive-accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600';
 
 // ─── 门控失败 → 强制提炼确认 ───
 
@@ -59,7 +60,10 @@ export class ForceExtractModal extends Modal {
     btnRow.createEl('button', { text: '放弃' }).addEventListener('click', () => this.close());
     const forceBtn = btnRow.createEl('button', {
       text: '强制提炼',
-      attr: { style: 'background:var(--color-orange);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600' },
+      attr: {
+        style:
+          'background:var(--color-orange);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600',
+      },
     });
     forceBtn.addEventListener('click', async () => {
       this.close();
@@ -67,7 +71,9 @@ export class ForceExtractModal extends Modal {
     });
   }
 
-  onClose() { this.contentEl.empty(); }
+  onClose() {
+    this.contentEl.empty();
+  }
 }
 
 // ─── 重复提炼确认 ───
@@ -94,7 +100,9 @@ export class DuplicateConfirmModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
-    const daysAgo = Math.floor((Date.now() - new Date(this.previous.extractedAt).getTime()) / (1000 * 60 * 60 * 24));
+    const daysAgo = Math.floor(
+      (Date.now() - new Date(this.previous.extractedAt).getTime()) / (1000 * 60 * 60 * 24),
+    );
     const timeStr = daysAgo === 0 ? '今天' : `${daysAgo}天前`;
 
     contentEl.empty();
@@ -113,14 +121,19 @@ export class DuplicateConfirmModal extends Modal {
       });
     }
 
-    const reExtractBtn = btnRow.createEl('button', { text: '重新提炼', attr: { style: BTN_PRIMARY } });
+    const reExtractBtn = btnRow.createEl('button', {
+      text: '重新提炼',
+      attr: { style: BTN_PRIMARY },
+    });
     reExtractBtn.addEventListener('click', async () => {
       this.close();
       await this.plugin.runExtraction(this.input, { ...this.opts, skipDuplicateCheck: true });
     });
   }
 
-  onClose() { this.contentEl.empty(); }
+  onClose() {
+    this.contentEl.empty();
+  }
 }
 
 // ─── 提炼失败 → 错误弹窗（可选重试） ───
@@ -170,10 +183,15 @@ export class ErrorModal extends Modal {
       const retryBtn = btnRow.createEl('button', { text: '重试', attr: { style: BTN_PRIMARY } });
       retryBtn.addEventListener('click', async () => {
         this.close();
-        await this.plugin.runExtraction(this.input, { skipDuplicateCheck: true, skipGate: this.opts.skipGate });
+        await this.plugin.runExtraction(this.input, {
+          skipDuplicateCheck: true,
+          skipGate: this.opts.skipGate,
+        });
       });
     }
   }
 
-  onClose() { this.contentEl.empty(); }
+  onClose() {
+    this.contentEl.empty();
+  }
 }

@@ -6,20 +6,19 @@
  * 各面板渲染逻辑拆分至独立私有方法。
  */
 
-import {
-  ItemView,
-  WorkspaceLeaf,
-  Notice,
-  Modal,
-  App,
-  TFile,
-} from 'obsidian';
+import { ItemView, WorkspaceLeaf, Notice, Modal, App, TFile } from 'obsidian';
 import AtomicNotesPlugin from '../main';
 import { buildSimilarityMatrix, NoteMeta } from '../discovery/similarity-matrix';
 import { ExtractionHistoryEntry } from '../services/history-service';
 import { stripImageNoise } from '../utils/clipboard';
 import { ProgressCallback, ProgressEvent } from '../extraction/progress';
-import { ABOUT_PHASES, ABOUT_PROGRESS, ABOUT_GATE_RULES, ABOUT_VERIFY_STATUS, ABOUT_SCORE_DIMS } from './about-content';
+import {
+  ABOUT_PHASES,
+  ABOUT_PROGRESS,
+  ABOUT_GATE_RULES,
+  ABOUT_VERIFY_STATUS,
+  ABOUT_SCORE_DIMS,
+} from './about-content';
 
 export const VIEW_TYPE_ATOMIC_PANEL = 'atomic-notes-panel';
 
@@ -34,7 +33,8 @@ export class AtomicNotesPanel extends ItemView {
   private plugin: AtomicNotesPlugin;
   private _hideTimer: ReturnType<typeof setTimeout> | null = null;
   /** 历史面板中当前处于确认态的删除按钮（用于互斥管理） */
-  private _confirmingDelBtn: { el: HTMLElement; timeout: ReturnType<typeof setTimeout> } | null = null;
+  private _confirmingDelBtn: { el: HTMLElement; timeout: ReturnType<typeof setTimeout> } | null =
+    null;
 
   /** 进度 UI 元素引用 */
   private _progressWrap: HTMLElement | null = null;
@@ -49,7 +49,12 @@ export class AtomicNotesPanel extends ItemView {
   private _inputSubMode: 'text' | 'url' = 'text';
 
   /** 发现面板相似度矩阵缓存 */
-  private _simCache: { folder: string; noteCount: number; notes: NoteMeta[]; matrix: number[][] } | null = null;
+  private _simCache: {
+    folder: string;
+    noteCount: number;
+    notes: NoteMeta[];
+    matrix: number[][];
+  } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: AtomicNotesPlugin) {
     super(leaf);
@@ -78,7 +83,10 @@ export class AtomicNotesPanel extends ItemView {
     container.createEl('h3', { text: '原子笔记提炼' });
 
     // Tab bar
-    const tabBar = container.createEl('div', { cls: 'atomic-notes-tabs', attr: { role: 'tablist', 'aria-label': '功能导航' } });
+    const tabBar = container.createEl('div', {
+      cls: 'atomic-notes-tabs',
+      attr: { role: 'tablist', 'aria-label': '功能导航' },
+    });
     const tabLabels = ['输入', '历史', '发现', '介绍'];
     const tabs: HTMLElement[] = [];
     for (let i = 0; i < tabLabels.length; i++) {
@@ -97,16 +105,46 @@ export class AtomicNotesPanel extends ItemView {
     }
 
     // Tab content containers
-    const inputPanel = container.createEl('div', { cls: 'atomic-notes-tab-content active', attr: { role: 'tabpanel', id: 'tab-panel-0', 'aria-labelledby': tabs[0].id || 'tab-0' } });
-    const historyPanel = container.createEl('div', { cls: 'atomic-notes-tab-content', attr: { style: 'max-height:500px;overflow-y:auto', role: 'tabpanel', id: 'tab-panel-1', 'aria-labelledby': tabs[1].id || 'tab-1' } });
-    const discoveryPanel = container.createEl('div', { cls: 'atomic-notes-tab-content', attr: { style: 'max-height:none;overflow-y:visible', role: 'tabpanel', id: 'tab-panel-2', 'aria-labelledby': tabs[2].id || 'tab-2' } });
-    const aboutPanel = container.createEl('div', { cls: 'atomic-notes-tab-content', attr: { style: 'max-height:none;overflow-y:visible', role: 'tabpanel', id: 'tab-panel-3', 'aria-labelledby': tabs[3].id || 'tab-3' } });
+    const inputPanel = container.createEl('div', {
+      cls: 'atomic-notes-tab-content active',
+      attr: { role: 'tabpanel', id: 'tab-panel-0', 'aria-labelledby': tabs[0].id || 'tab-0' },
+    });
+    const historyPanel = container.createEl('div', {
+      cls: 'atomic-notes-tab-content',
+      attr: {
+        style: 'max-height:500px;overflow-y:auto',
+        role: 'tabpanel',
+        id: 'tab-panel-1',
+        'aria-labelledby': tabs[1].id || 'tab-1',
+      },
+    });
+    const discoveryPanel = container.createEl('div', {
+      cls: 'atomic-notes-tab-content',
+      attr: {
+        style: 'max-height:none;overflow-y:visible',
+        role: 'tabpanel',
+        id: 'tab-panel-2',
+        'aria-labelledby': tabs[2].id || 'tab-2',
+      },
+    });
+    const aboutPanel = container.createEl('div', {
+      cls: 'atomic-notes-tab-content',
+      attr: {
+        style: 'max-height:none;overflow-y:visible',
+        role: 'tabpanel',
+        id: 'tab-panel-3',
+        'aria-labelledby': tabs[3].id || 'tab-3',
+      },
+    });
     const contentPanels = [inputPanel, historyPanel, discoveryPanel, aboutPanel];
 
     // 进度区域 + 提炼按钮（初始隐藏，在 setupXxx 中创建）
     const progressWrap = container.createEl('div', {
       cls: 'atomic-notes-progress-wrap',
-      attr: { style: 'margin:8px 0;padding:8px 12px;border:1px solid var(--background-modifier-border);border-radius:6px;display:none;' },
+      attr: {
+        style:
+          'margin:8px 0;padding:8px 12px;border:1px solid var(--background-modifier-border);border-radius:6px;display:none;',
+      },
     });
     this._progressWrap = progressWrap;
 
@@ -121,8 +159,8 @@ export class AtomicNotesPanel extends ItemView {
           contentPanels[j].classList.toggle('active', j === i);
         }
         // 进度区域和按钮只在输入面板显示
-        progressWrap.style.display = (i > 0) ? 'none' : progressWrap.style.display;
-        buttonWrap.style.display = (i > 0) ? 'none' : '';
+        progressWrap.style.display = i > 0 ? 'none' : progressWrap.style.display;
+        buttonWrap.style.display = i > 0 ? 'none' : '';
         // 延迟渲染（首次激活时填充内容）
         if (i === 1) this.renderHistoryPanel(historyPanel);
         else if (i === 2) this.renderDiscovery(discoveryPanel);
@@ -147,11 +185,17 @@ export class AtomicNotesPanel extends ItemView {
     });
     const textModeBtn = subToggleBar.createEl('span', {
       text: '文本',
-      attr: { style: 'font-size:12px;font-weight:600;color:var(--text-accent);cursor:pointer;padding:2px 0;border-bottom:2px solid var(--text-accent)' },
+      attr: {
+        style:
+          'font-size:12px;font-weight:600;color:var(--text-accent);cursor:pointer;padding:2px 0;border-bottom:2px solid var(--text-accent)',
+      },
     });
     const urlModeBtn = subToggleBar.createEl('span', {
       text: 'URL',
-      attr: { style: 'font-size:12px;color:var(--text-muted);cursor:pointer;padding:2px 0;border-bottom:2px solid transparent' },
+      attr: {
+        style:
+          'font-size:12px;color:var(--text-muted);cursor:pointer;padding:2px 0;border-bottom:2px solid transparent',
+      },
     });
 
     // textarea（文本模式）
@@ -193,13 +237,22 @@ export class AtomicNotesPanel extends ItemView {
 
     // 底部信息栏（文本模式）
     const pasteMeta = panel.createEl('div', { cls: 'atomic-notes-meta-row' });
-    const charCountEl = pasteMeta.createEl('span', { cls: 'atomic-notes-char-count', text: '0 字' });
-    const pasteActions = pasteMeta.createEl('div', { attr: { style: 'display:flex;gap:8px;align-items:center' } });
+    const charCountEl = pasteMeta.createEl('span', {
+      cls: 'atomic-notes-char-count',
+      text: '0 字',
+    });
+    const pasteActions = pasteMeta.createEl('div', {
+      attr: { style: 'display:flex;gap:8px;align-items:center' },
+    });
     const readClipBtn = pasteActions.createEl('a', {
-      cls: 'atomic-notes-clip-btn', text: '读取剪贴板', attr: { href: '#' },
+      cls: 'atomic-notes-clip-btn',
+      text: '读取剪贴板',
+      attr: { href: '#' },
     });
     const clearPasteLink = pasteActions.createEl('a', {
-      cls: 'atomic-notes-clear-link', text: '清空', attr: { href: '#' },
+      cls: 'atomic-notes-clear-link',
+      text: '清空',
+      attr: { href: '#' },
     });
 
     // URL 输入框（URL模式，初始隐藏）
@@ -211,12 +264,18 @@ export class AtomicNotesPanel extends ItemView {
 
     const urlMeta = panel.createEl('div', { cls: 'atomic-notes-meta-row' });
     urlMeta.style.display = 'none';
-    const urlMetaActions = urlMeta.createEl('div', { attr: { style: 'display:flex;gap:8px;align-items:center' } });
+    const urlMetaActions = urlMeta.createEl('div', {
+      attr: { style: 'display:flex;gap:8px;align-items:center' },
+    });
     const pasteUrlBtn = urlMetaActions.createEl('a', {
-      cls: 'atomic-notes-clip-btn', text: '粘贴剪贴板URL', attr: { href: '#' },
+      cls: 'atomic-notes-clip-btn',
+      text: '粘贴剪贴板URL',
+      attr: { href: '#' },
     });
     urlMetaActions.createEl('a', {
-      cls: 'atomic-notes-clear-link', text: '清除', attr: { href: '#' },
+      cls: 'atomic-notes-clear-link',
+      text: '清除',
+      attr: { href: '#' },
     });
 
     // 保存引用供提炼按钮使用
@@ -295,7 +354,9 @@ export class AtomicNotesPanel extends ItemView {
     });
 
     // 清除 URL
-    const clearUrlLink = urlMetaActions.querySelector('.atomic-notes-clear-link') as HTMLAnchorElement;
+    const clearUrlLink = urlMetaActions.querySelector(
+      '.atomic-notes-clear-link',
+    ) as HTMLAnchorElement;
     clearUrlLink.addEventListener('click', (ev) => {
       ev.preventDefault();
       urlInput.value = '';
@@ -310,7 +371,9 @@ export class AtomicNotesPanel extends ItemView {
 
     if (history.length === 0) {
       el.createEl('div', { cls: 'atomic-notes-empty-state' });
-      const emptyEl = el.getElementsByClassName('atomic-notes-empty-state')[el.getElementsByClassName('atomic-notes-empty-state').length - 1];
+      const emptyEl = el.getElementsByClassName('atomic-notes-empty-state')[
+        el.getElementsByClassName('atomic-notes-empty-state').length - 1
+      ];
       emptyEl.createEl('span', { text: '📝', cls: 'empty-icon' });
       emptyEl.createEl('div', { text: '暂无提炼历史' });
       return;
@@ -318,7 +381,9 @@ export class AtomicNotesPanel extends ItemView {
 
     // 顶部操作栏
     const toolbar = el.createEl('div', {
-      attr: { style: 'display:flex;justify-content:space-between;align-items:center;padding:4px 8px 8px' },
+      attr: {
+        style: 'display:flex;justify-content:space-between;align-items:center;padding:4px 8px 8px',
+      },
     });
     toolbar.createEl('span', {
       text: `${history.length} 条记录`,
@@ -326,14 +391,21 @@ export class AtomicNotesPanel extends ItemView {
     });
     const clearBtn = toolbar.createEl('button', {
       text: '清空全部',
-      attr: { style: 'padding:2px 10px;font-size:11px;cursor:pointer;background:var(--background-modifier-error);color:var(--text-on-accent);border:none;border-radius:4px' },
+      attr: {
+        style:
+          'padding:2px 10px;font-size:11px;cursor:pointer;background:var(--background-modifier-error);color:var(--text-on-accent);border:none;border-radius:4px',
+      },
     });
     clearBtn.addEventListener('click', async () => {
       // 二次确认
       const confirmModal = new (class extends Modal {
         parent: AtomicNotesPanel;
         targetEl: HTMLElement;
-        constructor(app: App, parent: AtomicNotesPanel, targetEl: HTMLElement) { super(app); this.parent = parent; this.targetEl = targetEl; }
+        constructor(app: App, parent: AtomicNotesPanel, targetEl: HTMLElement) {
+          super(app);
+          this.parent = parent;
+          this.targetEl = targetEl;
+        }
         onOpen() {
           this.contentEl.empty();
           this.contentEl.createEl('h3', { text: '确认清空全部历史记录？' });
@@ -341,11 +413,16 @@ export class AtomicNotesPanel extends ItemView {
             text: `这将删除全部 ${history.length} 条提炼历史，已保存的笔记不会受影响。`,
             attr: { style: 'font-size:13px;color:var(--text-muted);margin:8px 0' },
           });
-          const btnRow = this.contentEl.createEl('div', { attr: { style: 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px' } });
+          const btnRow = this.contentEl.createEl('div', {
+            attr: { style: 'display:flex;gap:10px;justify-content:flex-end;margin-top:16px' },
+          });
           btnRow.createEl('button', { text: '取消' }).addEventListener('click', () => this.close());
           const confirmBtn = btnRow.createEl('button', {
             text: '确认清空',
-            attr: { style: 'background:var(--background-modifier-error);color:var(--text-on-accent);border:none;padding:6px 16px;border-radius:6px;cursor:pointer' },
+            attr: {
+              style:
+                'background:var(--background-modifier-error);color:var(--text-on-accent);border:none;padding:6px 16px;border-radius:6px;cursor:pointer',
+            },
           });
           confirmBtn.addEventListener('click', async () => {
             this.parent.plugin.settings.extractionHistory = [];
@@ -355,7 +432,9 @@ export class AtomicNotesPanel extends ItemView {
             this.parent.renderHistoryPanel(this.targetEl);
           });
         }
-        onClose() { this.contentEl.empty(); }
+        onClose() {
+          this.contentEl.empty();
+        }
       })(this.app, this, el);
       confirmModal.open();
     });
@@ -384,7 +463,10 @@ export class AtomicNotesPanel extends ItemView {
       });
       const delBtn = titleRow.createEl('span', {
         text: '\u00D7',
-        attr: { style: 'font-size:16px;color:var(--text-muted);cursor:pointer;padding:0 4px;line-height:1' },
+        attr: {
+          style:
+            'font-size:16px;color:var(--text-muted);cursor:pointer;padding:0 4px;line-height:1',
+        },
       });
       let delConfirming = false;
       delBtn.addEventListener('click', async () => {
@@ -428,7 +510,10 @@ export class AtomicNotesPanel extends ItemView {
         for (const savedPath of entry.savedPaths) {
           const linkEl = itemEl.createEl('a', {
             text: savedPath.split('/').pop(),
-            attr: { href: '#', style: 'font-size:11px;color:var(--text-accent);display:block;margin-left:8px' },
+            attr: {
+              href: '#',
+              style: 'font-size:11px;color:var(--text-accent);display:block;margin-left:8px',
+            },
           });
           linkEl.addEventListener('click', (ev) => {
             ev.preventDefault();
@@ -441,7 +526,9 @@ export class AtomicNotesPanel extends ItemView {
     if (total > 20) {
       const loadMoreBtn = listEl.createEl('button', {
         text: `加载更多 (${total - 20}条)`,
-        attr: { style: 'margin:8px auto;display:block;padding:4px 16px;font-size:12px;cursor:pointer' },
+        attr: {
+          style: 'margin:8px auto;display:block;padding:4px 16px;font-size:12px;cursor:pointer',
+        },
       });
       loadMoreBtn.addEventListener('click', () => {
         // 显示所有隐藏的条目（children[20] 起为先前隐藏的部分）
@@ -464,7 +551,10 @@ export class AtomicNotesPanel extends ItemView {
 
     // ── 作者 ──
     el.createEl('div', { text: '羽鳞君', cls: 'atomic-notes-about-author' });
-    el.createEl('p', { text: '喵字馆创始人 | 独立品牌设计师 | 赛博乐子人', cls: 'atomic-notes-about-text' });
+    el.createEl('p', {
+      text: '喵字馆创始人 | 独立品牌设计师 | 赛博乐子人',
+      cls: 'atomic-notes-about-text',
+    });
     el.createEl('p', {
       text: '交流微信：yanhu94（备注：竹叶飞刃）',
       attr: { style: 'color:var(--text-faint);font-size:12px;margin:4px 0' },
@@ -498,11 +588,26 @@ export class AtomicNotesPanel extends ItemView {
 
     // ── 去重算法 ──
     el.createEl('div', { text: '去重算法', cls: 'atomic-notes-about-section' });
-    el.createEl('p', { text: 'Phase 4 与 Phase 4b 采用 BM25 + 中文分词 + SimHash 三重组合算法：', cls: 'atomic-notes-about-text' });
-    el.createEl('div', { text: '• 中文正向最大匹配分词（200+ 词汇词典）+ 字符 n-gram 双轨提取 token', cls: 'atomic-notes-about-bullet' });
-    el.createEl('div', { text: '• BM25 饱和词频替代线性 TF，高频术语权重自动打折，避免术语污染误判', cls: 'atomic-notes-about-bullet' });
-    el.createEl('div', { text: '• 综合评分：内容余弦 0.5 + 关键词 Jaccard 0.3 + 标题 Jaccard 0.2，多信号制衡', cls: 'atomic-notes-about-bullet' });
-    el.createEl('div', { text: '• 库内去重：SimHash 64 位指纹预过滤，汉明距离 < 3 才进入全量比对', cls: 'atomic-notes-about-bullet' });
+    el.createEl('p', {
+      text: 'Phase 4 与 Phase 4b 采用 BM25 + 中文分词 + SimHash 三重组合算法：',
+      cls: 'atomic-notes-about-text',
+    });
+    el.createEl('div', {
+      text: '• 中文正向最大匹配分词（200+ 词汇词典）+ 字符 n-gram 双轨提取 token',
+      cls: 'atomic-notes-about-bullet',
+    });
+    el.createEl('div', {
+      text: '• BM25 饱和词频替代线性 TF，高频术语权重自动打折，避免术语污染误判',
+      cls: 'atomic-notes-about-bullet',
+    });
+    el.createEl('div', {
+      text: '• 综合评分：内容余弦 0.5 + 关键词 Jaccard 0.3 + 标题 Jaccard 0.2，多信号制衡',
+      cls: 'atomic-notes-about-bullet',
+    });
+    el.createEl('div', {
+      text: '• 库内去重：SimHash 64 位指纹预过滤，汉明距离 < 3 才进入全量比对',
+      cls: 'atomic-notes-about-bullet',
+    });
     el.createEl('p', {
       text: '知识库去重默认读取目标文件夹内容，可在设置中独立指定"去重目标文件夹"，适合有隐私需求用户限制去重范围。',
       cls: 'atomic-notes-about-text',
@@ -523,7 +628,7 @@ export class AtomicNotesPanel extends ItemView {
     // ── URL 内容提取 ──
     el.createEl('div', { text: 'URL 内容提取', cls: 'atomic-notes-about-section' });
     el.createEl('p', {
-      text: '从网页链接读取内容时，插件先通过 80+ 选择器剥离导航、页脚、侧栏、广告、评论区、推荐、社交分享、法律声明等非正文区域，再清理 HTML 标签、注释和实体编码，确保送到 AI 手中的是干净的文本正文。',
+      text: '从网页链接读取内容时，插件先通过 DOMParser + querySelector 精确解析 HTML，再用 100+ 选择器剥离导航、页脚、侧栏、广告、评论区、推荐、社交分享、法律声明等非正文区域，最后清理标签、注释和实体编码，确保送到 AI 手中的是干净的文本正文。',
       cls: 'atomic-notes-about-text',
     });
     el.createEl('p', {
@@ -547,23 +652,44 @@ export class AtomicNotesPanel extends ItemView {
       text: '硬阻断的规则命中后直接拒绝提交流程（可选强制提炼跳过）；软警告仅提醒用户，不影响继续提炼。累积 3 条警告自动升级为阻断。',
       cls: 'atomic-notes-about-text',
     });
-    el.getElementsByClassName('atomic-notes-about-text')[el.getElementsByClassName('atomic-notes-about-text').length - 1].setAttr('style', 'margin-top:8px');
+    el.getElementsByClassName('atomic-notes-about-text')[
+      el.getElementsByClassName('atomic-notes-about-text').length - 1
+    ].setAttr('style', 'margin-top:8px');
 
     // ── 内容核查（三层管线）──
     el.createEl('div', { text: '内容核查（三层管线）', cls: 'atomic-notes-about-section' });
-    el.createEl('p', { text: '从每条笔记中提取事实声明（数字、百分比、日期、实体名称），通过三层管线逐条核查：', cls: 'atomic-notes-about-text' });
-    el.createEl('div', { text: 'Layer 1 · 原文溯源：零 API 调用，在原文中精确或模糊匹配声明锚点', cls: 'atomic-notes-about-bullet' });
-    el.createEl('div', { text: 'Layer 2 · 语义比对：单次 AI 调用，仅发送截断文本以节省 token', cls: 'atomic-notes-about-bullet' });
-    el.createEl('div', { text: 'Layer 3 · 超源标记：零 API 调用，将超出原文范围的声明标记为"超源"', cls: 'atomic-notes-about-bullet' });
+    el.createEl('p', {
+      text: '从每条笔记中提取事实声明（数字、百分比、日期、实体名称），通过三层管线逐条核查：',
+      cls: 'atomic-notes-about-text',
+    });
+    el.createEl('div', {
+      text: 'Layer 1 · 原文溯源：零 API 调用，在原文中精确或模糊匹配声明锚点',
+      cls: 'atomic-notes-about-bullet',
+    });
+    el.createEl('div', {
+      text: 'Layer 2 · 语义比对：单次 AI 调用，仅发送截断文本以节省 token',
+      cls: 'atomic-notes-about-bullet',
+    });
+    el.createEl('div', {
+      text: 'Layer 3 · 超源标记：零 API 调用，将超出原文范围的声明标记为"超源"',
+      cls: 'atomic-notes-about-bullet',
+    });
     for (const [status, desc] of ABOUT_VERIFY_STATUS) {
       const row = el.createEl('div', { cls: 'atomic-notes-about-detail-row' });
-      row.createEl('span', { text: status, cls: 'detail-label', attr: { style: 'min-width:56px;color:var(--text-accent)' } });
+      row.createEl('span', {
+        text: status,
+        cls: 'detail-label',
+        attr: { style: 'min-width:56px;color:var(--text-accent)' },
+      });
       row.createEl('span', { text: desc, cls: 'detail-desc' });
     }
 
     // ── 复查机制 ──
     el.createEl('div', { text: '复查机制', cls: 'atomic-notes-about-section' });
-    el.createEl('p', { text: '开启后 AI 从两个维度对每条笔记打分（各 1-5 分）：', cls: 'atomic-notes-about-text' });
+    el.createEl('p', {
+      text: '开启后 AI 从两个维度对每条笔记打分（各 1-5 分）：',
+      cls: 'atomic-notes-about-text',
+    });
     for (const [label, desc] of ABOUT_SCORE_DIMS) {
       const row = el.createEl('div', { cls: 'atomic-notes-about-detail-row' });
       row.createEl('span', { text: label, cls: 'detail-label' });
@@ -573,7 +699,9 @@ export class AtomicNotesPanel extends ItemView {
       text: '总分 = 洞见 + 知识（2-10）。等级：差(2-3) 中(4-5) 良(6-7) 优(8-10)。低于策略门槛的笔记被自动过滤，不进入知识库。这是提炼后的最后一道质量防线。',
       cls: 'atomic-notes-about-text',
     });
-    el.getElementsByClassName('atomic-notes-about-text')[el.getElementsByClassName('atomic-notes-about-text').length - 1].setAttr('style', 'margin-top:6px');
+    el.getElementsByClassName('atomic-notes-about-text')[
+      el.getElementsByClassName('atomic-notes-about-text').length - 1
+    ].setAttr('style', 'margin-top:6px');
 
     // ── 超时与缓存 ──
     el.createEl('div', { text: '超时与缓存', cls: 'atomic-notes-about-section' });
@@ -590,7 +718,10 @@ export class AtomicNotesPanel extends ItemView {
       text: '准备提炼...',
     });
     this._progressBody = wrap.createEl('div', {
-      attr: { style: 'font-size:12px;color:var(--text-muted);line-height:1.8;max-height:240px;overflow-y:auto;' },
+      attr: {
+        style:
+          'font-size:12px;color:var(--text-muted);line-height:1.8;max-height:240px;overflow-y:auto;',
+      },
     });
   }
 
@@ -662,15 +793,30 @@ export class AtomicNotesPanel extends ItemView {
       cancelBtn.style.display = '';
 
       // Panel 内进度回调
-      const panelOnProgress: ProgressCallback = (event: ProgressEvent, allEvents: ProgressEvent[], totalMs: number) => {
+      const panelOnProgress: ProgressCallback = (
+        event: ProgressEvent,
+        allEvents: ProgressEvent[],
+        totalMs: number,
+      ) => {
         if (this._progressTitle) {
-          this._progressTitle.setText(`${event.phase}：${event.name} — 已用时 ${(totalMs / 1000).toFixed(1)}s`);
+          this._progressTitle.setText(
+            `${event.phase}：${event.name} — 已用时 ${(totalMs / 1000).toFixed(1)}s`,
+          );
         }
         if (!this._progressBody) return;
         this._progressBody.empty();
         for (const ev of allEvents) {
-          const icon = ev.status === 'running' ? '⟳ ' : (ev.status === 'success' ? '✓ ' : (ev.status === 'failed' ? '✗ ' : '− '));
-          const line = this._progressBody.createEl('div', { text: `${icon}${ev.phase} ${ev.name}${ev.detail ? ' — ' + ev.detail : ''}` });
+          const icon =
+            ev.status === 'running'
+              ? '⟳ '
+              : ev.status === 'success'
+                ? '✓ '
+                : ev.status === 'failed'
+                  ? '✗ '
+                  : '− ';
+          const line = this._progressBody.createEl('div', {
+            text: `${icon}${ev.phase} ${ev.name}${ev.detail ? ' — ' + ev.detail : ''}`,
+          });
           if (ev.status === 'running') line.style.color = 'var(--text-accent)';
           if (ev.status === 'success') line.style.color = 'var(--text-success)';
           if (ev.status === 'failed') line.style.color = 'var(--text-error)';
@@ -679,7 +825,10 @@ export class AtomicNotesPanel extends ItemView {
           const sp = event.subProgress;
           const labelText = sp.label ? '（' + sp.label + '）' : '';
           this._progressBody.createEl('div', {
-            attr: { style: 'margin-top:6px;padding-top:6px;border-top:1px solid var(--background-modifier-border);color:var(--text-accent)' },
+            attr: {
+              style:
+                'margin-top:6px;padding-top:6px;border-top:1px solid var(--background-modifier-border);color:var(--text-accent)',
+            },
             text: '进度 ' + sp.current + '/' + sp.total + labelText,
           });
         }
@@ -723,13 +872,15 @@ export class AtomicNotesPanel extends ItemView {
     }
 
     const toolbar = container.createEl('div', { attr: { style: 'margin-bottom:8px' } });
-    toolbar.createEl('button', {
-      text: '刷新',
-      cls: 'mod-cta',
-      attr: { style: 'font-size:12px' },
-    }).addEventListener('click', async () => {
-      this.renderDiscovery(container);
-    });
+    toolbar
+      .createEl('button', {
+        text: '刷新',
+        cls: 'mod-cta',
+        attr: { style: 'font-size:12px' },
+      })
+      .addEventListener('click', async () => {
+        this.renderDiscovery(container);
+      });
 
     const card = container.createEl('div', { cls: 'atomic-notes-discovery-card' });
     this.renderRecommendation(card);
@@ -753,17 +904,21 @@ export class AtomicNotesPanel extends ItemView {
     }
 
     // 搜索式选择器
-    const searchWrap = container.createEl('div', { attr: { style: 'position:relative;margin-bottom:8px' } });
+    const searchWrap = container.createEl('div', {
+      attr: { style: 'position:relative;margin-bottom:8px' },
+    });
     const searchInput = searchWrap.createEl('input', {
       attr: {
         type: 'text',
         placeholder: '搜索笔记...',
-        style: 'width:100%;font-size:12px;padding:5px 8px;border:1px solid var(--background-modifier-border);border-radius:4px;box-sizing:border-box',
+        style:
+          'width:100%;font-size:12px;padding:5px 8px;border:1px solid var(--background-modifier-border);border-radius:4px;box-sizing:border-box',
       },
     }) as HTMLInputElement;
     const dropdown = searchWrap.createEl('div', {
       attr: {
-        style: 'display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--background-primary);border:1px solid var(--background-modifier-border);border-radius:0 0 4px 4px;z-index:10;box-shadow:0 4px 8px rgba(0,0,0,0.15)',
+        style:
+          'display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--background-primary);border:1px solid var(--background-modifier-border);border-radius:0 0 4px 4px;z-index:10;box-shadow:0 4px 8px rgba(0,0,0,0.15)',
       },
     });
 
@@ -778,9 +933,7 @@ export class AtomicNotesPanel extends ItemView {
     const updateDropdown = (filter = '') => {
       dropdown.empty();
       const q = filter.toLowerCase();
-      const matched = q
-        ? noteMetas.filter(m => m.title.toLowerCase().includes(q))
-        : noteMetas;
+      const matched = q ? noteMetas.filter((m) => m.title.toLowerCase().includes(q)) : noteMetas;
       if (matched.length === 0) {
         dropdown.createEl('div', {
           text: '无匹配笔记',
@@ -793,7 +946,9 @@ export class AtomicNotesPanel extends ItemView {
       for (const meta of show) {
         const item = dropdown.createEl('div', {
           text: meta.title,
-          attr: { style: 'padding:5px 10px;font-size:12px;cursor:pointer;color:var(--text-normal)' },
+          attr: {
+            style: 'padding:5px 10px;font-size:12px;cursor:pointer;color:var(--text-normal)',
+          },
         });
         item.addEventListener('mouseenter', () => {
           item.style.background = 'var(--background-modifier-hover)';
@@ -816,7 +971,9 @@ export class AtomicNotesPanel extends ItemView {
       if (!selectedPath) {
         resultsContainer.empty();
         resultsContainer.createEl('div', { cls: 'atomic-notes-empty-state' });
-        const emptyEl = resultsContainer.getElementsByClassName('atomic-notes-empty-state')[resultsContainer.getElementsByClassName('atomic-notes-empty-state').length - 1];
+        const emptyEl = resultsContainer.getElementsByClassName('atomic-notes-empty-state')[
+          resultsContainer.getElementsByClassName('atomic-notes-empty-state').length - 1
+        ];
         emptyEl.createEl('span', { text: '🔍', cls: 'empty-icon' });
         emptyEl.createEl('div', { text: '请先搜索并选择一条笔记' });
         return;
@@ -824,7 +981,9 @@ export class AtomicNotesPanel extends ItemView {
 
       resultsContainer.empty();
       resultsContainer.createEl('div', { cls: 'atomic-notes-empty-state' });
-      const loadEl = resultsContainer.getElementsByClassName('atomic-notes-empty-state')[resultsContainer.getElementsByClassName('atomic-notes-empty-state').length - 1];
+      const loadEl = resultsContainer.getElementsByClassName('atomic-notes-empty-state')[
+        resultsContainer.getElementsByClassName('atomic-notes-empty-state').length - 1
+      ];
       loadEl.createEl('span', { text: '🔄', cls: 'empty-icon' });
       loadEl.createEl('div', { text: '正在计算相似度...' });
 
@@ -832,7 +991,11 @@ export class AtomicNotesPanel extends ItemView {
         const currentFolder = settings.targetFolder || '';
         // limit 对齐 buildSimilarityMatrix 内部的 Math.min(files.length, 500)
         const currentCount = Math.min(files.length, 500);
-        if (!this._simCache || this._simCache.folder !== currentFolder || this._simCache.noteCount !== currentCount) {
+        if (
+          !this._simCache ||
+          this._simCache.folder !== currentFolder ||
+          this._simCache.noteCount !== currentCount
+        ) {
           const built = await buildSimilarityMatrix(app.vault, settings.targetFolder);
           this._simCache = {
             folder: currentFolder,
@@ -846,7 +1009,10 @@ export class AtomicNotesPanel extends ItemView {
         const idx = notes.findIndex((n: NoteMeta) => n.path === selectedPath);
         if (idx < 0) {
           resultsContainer.empty();
-          resultsContainer.createEl('p', { text: '未找到该笔记', attr: { style: 'color:var(--text-muted)' } });
+          resultsContainer.createEl('p', {
+            text: '未找到该笔记',
+            attr: { style: 'color:var(--text-muted)' },
+          });
           return;
         }
 

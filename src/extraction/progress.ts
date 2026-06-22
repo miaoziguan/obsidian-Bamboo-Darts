@@ -20,11 +20,15 @@ export interface ProgressEvent {
   name: string;
   status: ProgressStatus;
   detail?: string;
-  subProgress?: { current: number; total: number; label?: string; } | null;
+  subProgress?: { current: number; total: number; label?: string } | null;
   elapsedMs?: number;
 }
 
-export type ProgressCallback = (event: ProgressEvent, allEvents: ProgressEvent[], totalElapsedMs: number) => void;
+export type ProgressCallback = (
+  event: ProgressEvent,
+  allEvents: ProgressEvent[],
+  totalElapsedMs: number,
+) => void;
 
 // === ProgressTracker：封装阶段生命周期 ===
 
@@ -104,5 +108,14 @@ export function createProgressTracker(onProgress?: ProgressCallback | null): Pro
     emit();
   };
 
-  return { start, update, complete, skip, fail, finish, currentIndex: () => currentIdx, allEvents: () => events.slice() };
+  return {
+    start,
+    update,
+    complete,
+    skip,
+    fail,
+    finish,
+    currentIndex: () => currentIdx,
+    allEvents: () => events.slice(),
+  };
 }

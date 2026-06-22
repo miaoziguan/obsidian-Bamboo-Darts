@@ -1,6 +1,6 @@
 /**
  * 笔记复查模块（AI 双重保险）
- * 
+ *
  * 功能：
  * - 对提炼出的笔记进行 AI 价值评分
  * - 过滤低质量笔记（评分不达标丢弃）
@@ -27,13 +27,13 @@ export interface ReviewConfig {
 }
 
 export interface ReviewResult {
-  index: number;        // 笔记序号（0-based）
-  title?: string;       // 笔记标题（复查前的原始标题，供 UI 跨过滤匹配）
-  insightScore: number;  // 洞见价值得分（1-5）
-  knowledgeScore: number;// 知识价值得分（1-5）
-  finalScore: number;   // 总分 = 洞见 + 知识（2-10）
+  index: number; // 笔记序号（0-based）
+  title?: string; // 笔记标题（复查前的原始标题，供 UI 跨过滤匹配）
+  insightScore: number; // 洞见价值得分（1-5）
+  knowledgeScore: number; // 知识价值得分（1-5）
+  finalScore: number; // 总分 = 洞见 + 知识（2-10）
   verdict: '保留' | '丢弃';
-  reason: string;       // AI 给出的简短理由
+  reason: string; // AI 给出的简短理由
 }
 
 /** 总分等级 */
@@ -46,14 +46,14 @@ export function scoreGrade(score: number): { label: string; color: string } {
 
 /**
  * 对笔记进行 AI 复查
- * 
+ *
  * @param notes  第一次提炼输出的笔记草稿（格式 A，不变）
  * @param config API 配置
  * @returns      过滤+排序后的笔记（格式 A 不变），以及复查详情
  */
 export async function reviewNotes(
   notes: AtomicNote[],
-  config: ReviewConfig
+  config: ReviewConfig,
 ): Promise<{ reviewedNotes: AtomicNote[]; reviewDetails: ReviewResult[]; success: boolean }> {
   if (notes.length === 0) {
     return { reviewedNotes: [], reviewDetails: [], success: true };
@@ -68,7 +68,7 @@ export async function reviewNotes(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.deepseekApiKey}`,
+        Authorization: `Bearer ${config.deepseekApiKey}`,
       },
       body: JSON.stringify({
         model: config.model,
@@ -98,10 +98,10 @@ export async function reviewNotes(
     }
 
     const kept = reviewDetails
-      .filter(r => r.verdict === '保留')
+      .filter((r) => r.verdict === '保留')
       .sort((a, b) => b.finalScore - a.finalScore);
 
-    const reviewedNotes = kept.map(r => notes[r.index]).filter(Boolean);
+    const reviewedNotes = kept.map((r) => notes[r.index]).filter(Boolean);
 
     return { reviewedNotes, reviewDetails, success: true };
   } catch (error) {
@@ -161,8 +161,8 @@ function buildReviewPrompt(notes: AtomicNote[], minScore: number): string {
 
       if (outOfScope > 0) {
         const outOfScopeClaims = note.verification
-          .filter(v => v.status === '超源')
-          .map(v => `"${v.claim}"`)
+          .filter((v) => v.status === '超源')
+          .map((v) => `"${v.claim}"`)
           .join('; ');
         prompt += `verification: ${traced} 条已溯源，${needsCompare} 条需对比，${outOfScope} 条超源\n`;
         prompt += `verification_warning: 存在 ${outOfScope} 条超源声明：${outOfScopeClaims}\n`;
@@ -188,7 +188,11 @@ function buildReviewPrompt(notes: AtomicNote[], minScore: number): string {
 /**
  * 解析 AI 复查输出（JSON）
  */
-function parseReviewOutput(aiContent: string, expectedCount: number, minScore: number = 6): ReviewResult[] {
+function parseReviewOutput(
+  aiContent: string,
+  expectedCount: number,
+  minScore: number = 6,
+): ReviewResult[] {
   const parsed = parseJsonArrayFromAI<{
     index: number;
     insight_score: number;
@@ -222,17 +226,15 @@ function parseReviewOutput(aiContent: string, expectedCount: number, minScore: n
     const knowledge = clampScore(r.knowledge_score ?? 3);
 
     // 总分 = 洞见 + 知识（直接加法，范围 2-10）
-    const final = r.final_score != null
-      ? Math.round(r.final_score)
-      : insight + knowledge;
+    const final = r.final_score != null ? Math.round(r.final_score) : insight + knowledge;
 
-    const verdict = final >= minScore ? '保留' as const : '丢弃' as const;
+    const verdict = final >= minScore ? ('保留' as const) : ('丢弃' as const);
 
     // 检查 AI verdict 与重算值是否一致
     const aiVerdict = (r.verdict ?? '').trim();
     if (aiVerdict && aiVerdict !== verdict) {
       aiVerdictDisagreements.push(
-        `笔记${idx + 1}: AI判"${aiVerdict}" → 重算"${verdict}"（总分=${final}，阈值=${minScore}）`
+        `笔记${idx + 1}: AI判"${aiVerdict}" → 重算"${verdict}"（总分=${final}，阈值=${minScore}）`,
       );
     }
 
@@ -266,7 +268,9 @@ function parseReviewOutput(aiContent: string, expectedCount: number, minScore: n
   }
 
   if (aiVerdictDisagreements.length > 0) {
-    console.warn(`[复查] AI verdict 与重算不一致（${aiVerdictDisagreements.length} 条）：\n  ${aiVerdictDisagreements.join('\n  ')}`);
+    console.warn(
+      `[复查] AI verdict 与重算不一致（${aiVerdictDisagreements.length} 条）：\n  ${aiVerdictDisagreements.join('\n  ')}`,
+    );
   }
   if (missingCount > 0) {
     console.warn(`[复查] AI 遗漏 ${missingCount} 条笔记评分，已补默认值`);

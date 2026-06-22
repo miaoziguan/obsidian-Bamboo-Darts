@@ -59,7 +59,7 @@ tags: 标签1, 标签2
  */
 export function buildSystemPrompt(
   tagPreferences: string[],
-  tagMode: 'lenient' | 'strict' = 'lenient'
+  tagMode: 'lenient' | 'strict' = 'lenient',
 ): string {
   let prompt = BASE_SYSTEM_PROMPT;
 
@@ -78,7 +78,10 @@ export function buildSystemPrompt(
 /**
  * Build the user prompt for extraction
  */
-export function buildExtractionPrompt(content: string, truncateLength: number = INPUT_TRUNCATE_LENGTH): string {
+export function buildExtractionPrompt(
+  content: string,
+  truncateLength: number = INPUT_TRUNCATE_LENGTH,
+): string {
   return `请从以下内容中提炼原子笔记（子弹笔记）。
 
 \`\`\`

@@ -11,16 +11,33 @@
 import { requestUrl, Vault } from 'obsidian';
 import { runGateChecks } from './gate';
 import { AtomicNote } from './utils/notes-standards';
-import { crossCheckBatch, checkAgainstVaultDetailed, VaultMatchInfo, DedupResult, DuplicateInfo, getDefaultDedupCache } from './deduplicator';
+import {
+  crossCheckBatch,
+  checkAgainstVaultDetailed,
+  VaultMatchInfo,
+  DedupResult,
+  DuplicateInfo,
+  getDefaultDedupCache,
+} from './deduplicator';
 import { SemanticDedupManager } from './utils/embedding';
-import { classifyContent, resolveProfileConfig, ContentProfile, ProfileConfig } from './extraction/profiles';
+import {
+  classifyContent,
+  resolveProfileConfig,
+  ContentProfile,
+  ProfileConfig,
+} from './extraction/profiles';
 import { verifyClaims } from './extraction/fact-checker';
 import { reviewNotes, ReviewConfig, ReviewResult } from './review/note-reviewer';
 import { extractUrlContent } from './extraction/url-extractor';
 import { extractChunked } from './extraction/chunked-extractor';
 import { extractAtomicNotes } from './extraction/ai-extractor';
 import { INPUT_TRUNCATE_LENGTH, EXTRACTION_TIMEOUT_MS } from './constants';
-import { ProgressCallback, ProgressEvent, createProgressTracker, ProgressTracker } from './extraction/progress';
+import {
+  ProgressCallback,
+  ProgressEvent,
+  createProgressTracker,
+  ProgressTracker,
+} from './extraction/progress';
 import { fnv1aHash } from './utils/hash';
 
 /** 笔记内容指纹（FNV-1a 哈希，防碰撞能力远强于 length:prefix） */
@@ -41,12 +58,12 @@ function remapPendingDuplicates(
   notes.forEach((note, idx) => postIndexMap.set(noteFingerprint(note), idx));
 
   return pending
-    .filter(p => {
+    .filter((p) => {
       // 构造临时 AtomicNote 以复用 noteFingerprint
       const key = `${p.newNoteContent.length}:${fnv1aHash(p.newNoteContent.slice(0, 200))}`;
       return postIndexMap.has(key);
     })
-    .map(p => {
+    .map((p) => {
       const key = `${p.newNoteContent.length}:${fnv1aHash(p.newNoteContent.slice(0, 200))}`;
       return { ...p, newNoteIndex: postIndexMap.get(key)! };
     });
@@ -72,7 +89,11 @@ async function runVaultDedupPhase(
   config: ExtractorConfig,
   profileConfig: ProfileConfig,
   tracker: ProgressTracker,
-): Promise<{ notes: AtomicNote[]; vaultDedupResult?: DedupResult; vaultDedupPending: PendingDuplicate[] }> {
+): Promise<{
+  notes: AtomicNote[];
+  vaultDedupResult?: DedupResult;
+  vaultDedupPending: PendingDuplicate[];
+}> {
   if (!(config.enableVaultDedup && config.vault)) {
     tracker.start('Phase 4b', '知识库去重', '未启用或无 Vault');
     tracker.skip('未启用或无 Vault，跳过');
@@ -94,8 +115,15 @@ async function runVaultDedupPhase(
 
   const keptNotes: AtomicNote[] = [];
   const vaultDedupPending: PendingDuplicate[] = [];
-  const highDupCount = matchInfos.filter(m => m.bestMatch && m.bestMatch.similarity >= HIGH_SIM_THRESHOLD).length;
-  const midDupCount = matchInfos.filter(m => m.bestMatch && m.bestMatch.similarity >= MID_SIM_THRESHOLD && m.bestMatch.similarity < HIGH_SIM_THRESHOLD).length;
+  const highDupCount = matchInfos.filter(
+    (m) => m.bestMatch && m.bestMatch.similarity >= HIGH_SIM_THRESHOLD,
+  ).length;
+  const midDupCount = matchInfos.filter(
+    (m) =>
+      m.bestMatch &&
+      m.bestMatch.similarity >= MID_SIM_THRESHOLD &&
+      m.bestMatch.similarity < HIGH_SIM_THRESHOLD,
+  ).length;
 
   for (const info of matchInfos) {
     if (!info.bestMatch) {
@@ -136,8 +164,8 @@ async function runVaultDedupPhase(
     uniqueNotes: keptNotes,
     removedCount: 0, // 不再自动丢弃，全部由用户确认
     duplicates: matchInfos
-      .filter(m => m.bestMatch && m.bestMatch.similarity >= MID_SIM_THRESHOLD)
-      .map(m => ({
+      .filter((m) => m.bestMatch && m.bestMatch.similarity >= MID_SIM_THRESHOLD)
+      .map((m) => ({
         isDuplicate: true,
         similarity: m.bestMatch!.similarity,
         matchedNote: m.bestMatch!.path,
@@ -159,7 +187,11 @@ async function runFactCheckPhase(
   vaultDedupPending: PendingDuplicate[],
   tracker: ProgressTracker,
   fullContent?: string,
-): Promise<{ notes: AtomicNote[]; verificationSummary?: { traced: number; needsCompare: number; outOfScope: number }; vaultDedupPending: PendingDuplicate[] }> {
+): Promise<{
+  notes: AtomicNote[];
+  verificationSummary?: { traced: number; needsCompare: number; outOfScope: number };
+  vaultDedupPending: PendingDuplicate[];
+}> {
   if (!config.factCheck) {
     tracker.start('Phase 5', '内容核查', '未启用');
     tracker.skip('未启用，跳过');
@@ -167,15 +199,24 @@ async function runFactCheckPhase(
   }
 
   tracker.start('Phase 5', '内容核查', '正在溯源和比对...');
-  const verifyResult = await verifyClaims(truncatedContent, notes, {
-    deepseekApiKey: config.deepseekApiKey,
-    deepseekApiUrl: config.deepseekApiUrl,
-    model: config.model,
-    maxTokens: config.maxTokens,
-    signal: config.signal,
-  }, fullContent);
+  const verifyResult = await verifyClaims(
+    truncatedContent,
+    notes,
+    {
+      deepseekApiKey: config.deepseekApiKey,
+      deepseekApiUrl: config.deepseekApiUrl,
+      model: config.model,
+      maxTokens: config.maxTokens,
+      signal: config.signal,
+    },
+    fullContent,
+  );
 
-  const verificationSummary = { traced: verifyResult.traced, needsCompare: verifyResult.needsCompare, outOfScope: verifyResult.outOfScope };
+  const verificationSummary = {
+    traced: verifyResult.traced,
+    needsCompare: verifyResult.needsCompare,
+    outOfScope: verifyResult.outOfScope,
+  };
 
   if (verifyResult.error) {
     tracker.fail(`核查出错: ${verifyResult.error}`);
@@ -184,15 +225,19 @@ async function runFactCheckPhase(
 
   if (config.verifiedOnly) {
     const originalCount = notes.length;
-    notes = notes.filter(note => {
+    notes = notes.filter((note) => {
       const v = note.verification;
       if (!v || v.length === 0) return true;
-      return !v.some(r => r.status === '超源');
+      return !v.some((r) => r.status === '超源');
     });
     vaultDedupPending = remapPendingDuplicates(notes, vaultDedupPending);
-    tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}（过滤超源：${originalCount} → ${notes.length}）`);
+    tracker.complete(
+      `溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}（过滤超源：${originalCount} → ${notes.length}）`,
+    );
   } else {
-    tracker.complete(`溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}`);
+    tracker.complete(
+      `溯源 ${verifyResult.traced}，需对比 ${verifyResult.needsCompare}，超源 ${verifyResult.outOfScope}`,
+    );
   }
 
   return { notes, verificationSummary, vaultDedupPending };
@@ -205,7 +250,11 @@ async function runReviewPhase(
   profileConfig: ProfileConfig,
   vaultDedupPending: PendingDuplicate[],
   tracker: ProgressTracker,
-): Promise<{ notes: AtomicNote[]; vaultDedupPending: PendingDuplicate[]; reviewDetails?: ReviewResult[] }> {
+): Promise<{
+  notes: AtomicNote[];
+  vaultDedupPending: PendingDuplicate[];
+  reviewDetails?: ReviewResult[];
+}> {
   if (!config.enableReview) {
     tracker.start('Phase 6', '笔记复查', '未启用');
     tracker.skip('未启用，跳过');
@@ -305,9 +354,10 @@ interface Step {
 }
 
 function eventsToSteps(events: ProgressEvent[]): Step[] {
-  return events.map(e => ({
+  return events.map((e) => ({
     step: `${e.phase} ${e.name}`.trim(),
-    status: (e.status === 'pending' || e.status === 'running') ? 'running' : (e.status as Step['status']),
+    status:
+      e.status === 'pending' || e.status === 'running' ? 'running' : (e.status as Step['status']),
     message: e.detail || '',
   }));
 }
@@ -351,7 +401,7 @@ export function clearUrlCache(): void {
 
 async function readContent(
   input: { type: 'url' | 'text' | 'selection'; content: string },
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<ReadResult> {
   if (input.type === 'url') {
     // 先查缓存
@@ -438,7 +488,14 @@ export interface ExtractionResult {
   vaultDedupResult?: DedupResult;
   vaultDedupPending?: PendingDuplicate[];
   // 疑似重复提示（中相似度），供 main.ts 判断是否走"确认后保存"流程
-  duplicateHints?: { noteIndex: number; similarity: number; matchedNote: string; matchedContent: string; newNoteTitle: string; newNoteContent: string }[];
+  duplicateHints?: {
+    noteIndex: number;
+    similarity: number;
+    matchedNote: string;
+    matchedContent: string;
+    newNoteTitle: string;
+    newNoteContent: string;
+  }[];
   /** 复查评分详情（启用复查时） */
   reviewDetails?: ReviewResult[];
 }
@@ -464,12 +521,14 @@ export async function runExtraction(
     type: 'url' | 'text' | 'selection';
     content: string;
   },
-  config: Partial<ExtractorConfig> = {}
+  config: Partial<ExtractorConfig> = {},
 ): Promise<ExtractionResult> {
   const fullConfig: ExtractorConfig = { ...DEFAULT_CONFIG, ...config };
   const tracker: ProgressTracker = createProgressTracker(fullConfig.onProgress || null);
-  const truncateLength = fullConfig.inputTruncateLength && fullConfig.inputTruncateLength >= 1000
-    ? fullConfig.inputTruncateLength : INPUT_TRUNCATE_LENGTH;
+  const truncateLength =
+    fullConfig.inputTruncateLength && fullConfig.inputTruncateLength >= 1000
+      ? fullConfig.inputTruncateLength
+      : INPUT_TRUNCATE_LENGTH;
 
   // Phase 1: 读取内容
   tracker.start('Phase 1', '读取内容', '开始读取...');
@@ -483,9 +542,8 @@ export async function runExtraction(
   tracker.complete(`成功读取 ${readResult.content!.length} 字`);
 
   const content = readResult.content!;
-  const truncatedContent = content.length > truncateLength
-    ? content.slice(0, truncateLength)
-    : content;
+  const truncatedContent =
+    content.length > truncateLength ? content.slice(0, truncateLength) : content;
 
   // 整体超时保护（深度模式给更长时间）
   const timeoutMs = fullConfig.enableDeepMode ? EXTRACTION_TIMEOUT_MS * 2 : EXTRACTION_TIMEOUT_MS;
@@ -525,7 +583,6 @@ async function runExtractionPhases(
   config: Partial<ExtractorConfig>,
   truncateLength: number,
 ): Promise<ExtractionResult> {
-
   // Profile 分类：自动判断或手动指定（纯规则，零 API 调用，提前到门控之前）
   let detectedProfile: ContentProfile;
   let profileSource: 'auto' | 'manual';
@@ -545,7 +602,10 @@ async function runExtractionPhases(
 
   // Phase 2: 质量门控（使用 Profile 差异化阈值，skipGate 时跳过）
   let gateResult: { passed: boolean; summary: string; reasons: string[]; warnings: string[] } = {
-    passed: true, summary: '', reasons: [], warnings: [],
+    passed: true,
+    summary: '',
+    reasons: [],
+    warnings: [],
   };
 
   if (!fullConfig.skipGate) {
@@ -554,11 +614,18 @@ async function runExtractionPhases(
 
     if (!gateResult.passed) {
       tracker.fail(gateResult.summary);
-      return { success: false, steps: eventsToSteps(tracker.allEvents()), error: gateResult.summary, gateBlocked: true };
+      return {
+        success: false,
+        steps: eventsToSteps(tracker.allEvents()),
+        error: gateResult.summary,
+        gateBlocked: true,
+      };
     }
 
     if (gateResult.warnings.length > 0) {
-      tracker.complete(`通过（${gateResult.warnings.length} 条提醒：${gateResult.warnings[0]}${gateResult.warnings.length > 1 ? '...' : ''}）`);
+      tracker.complete(
+        `通过（${gateResult.warnings.length} 条提醒：${gateResult.warnings[0]}${gateResult.warnings.length > 1 ? '...' : ''}）`,
+      );
     } else {
       tracker.complete('通过');
     }
@@ -583,13 +650,21 @@ async function runExtractionPhases(
   let extractResult: { success: boolean; notes?: AtomicNote[]; error?: string };
 
   const profileLabel = `${profileSource === 'auto' ? '自动检测' : '手动指定'}`;
-  const deepHint = (content.length > truncateLength && !fullConfig.enableDeepMode) ? '（可在设置中开启深度提炼模式处理超长文本）' : '';
-  const truncateNote = content.length > truncateLength
-    ? ` 原文 ${content.length} 字，截断至 ${truncateLength} 字后发送${deepHint}`
-    : '';
+  const deepHint =
+    content.length > truncateLength && !fullConfig.enableDeepMode
+      ? '（可在设置中开启深度提炼模式处理超长文本）'
+      : '';
+  const truncateNote =
+    content.length > truncateLength
+      ? ` 原文 ${content.length} 字，截断至 ${truncateLength} 字后发送${deepHint}`
+      : '';
 
   if (fullConfig.enableDeepMode && content.length > truncateLength) {
-    tracker.start('Phase 3', '提炼原子笔记（深度模式）', `${profileLabel} | 文本 ${content.length} 字，分段提炼中...`);
+    tracker.start(
+      'Phase 3',
+      '提炼原子笔记（深度模式）',
+      `${profileLabel} | 文本 ${content.length} 字，分段提炼中...`,
+    );
     const chunkedNotes = await extractChunked(content, config, truncateLength, tracker);
     if (chunkedNotes.length === 0) {
       extractResult = { success: false, error: '深度提炼未产出任何笔记' };
@@ -597,13 +672,21 @@ async function runExtractionPhases(
       extractResult = { success: true, notes: chunkedNotes };
     }
   } else {
-    tracker.start('Phase 3', '提炼原子笔记', `${profileLabel} | 正在调用 DeepSeek API...${truncateNote}`);
+    tracker.start(
+      'Phase 3',
+      '提炼原子笔记',
+      `${profileLabel} | 正在调用 DeepSeek API...${truncateNote}`,
+    );
     extractResult = await extractAtomicNotes(truncatedContent, config);
   }
 
   if (!extractResult.success) {
     tracker.fail(extractResult.error || '提炼失败');
-    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: extractResult.error };
+    return {
+      success: false,
+      steps: eventsToSteps(tracker.allEvents()),
+      error: extractResult.error,
+    };
   }
 
   tracker.complete(`成功提炼 ${extractResult.notes!.length} 条原子笔记`);
@@ -612,11 +695,18 @@ async function runExtractionPhases(
   // Phase 4: 同批交叉去重
   tracker.start('Phase 4', '同批交叉去重', '开始去重...');
   const dedupResult = crossCheckBatch(notes, activeProfileConfig.crossBatchThreshold);
-  tracker.complete(`去重后剩余 ${dedupResult.uniqueNotes.length} 条（去除 ${notes.length - dedupResult.uniqueNotes.length} 条重复）`);
+  tracker.complete(
+    `去重后剩余 ${dedupResult.uniqueNotes.length} 条（去除 ${notes.length - dedupResult.uniqueNotes.length} 条重复）`,
+  );
   notes = dedupResult.uniqueNotes;
 
   if (notes.length === 0) {
-    return { success: false, steps: eventsToSteps(tracker.allEvents()), error: '未提炼出任何符合标准的原子笔记', notes: [] };
+    return {
+      success: false,
+      steps: eventsToSteps(tracker.allEvents()),
+      error: '未提炼出任何符合标准的原子笔记',
+      notes: [],
+    };
   }
 
   // 取消检查点（Phase 4 → 4b）
@@ -638,7 +728,14 @@ async function runExtractionPhases(
   }
 
   // Phase 5: 内容核查（可选）
-  const factCheckResult = await runFactCheckPhase(notes, truncatedContent, fullConfig, vaultDedupPending, tracker, content);
+  const factCheckResult = await runFactCheckPhase(
+    notes,
+    truncatedContent,
+    fullConfig,
+    vaultDedupPending,
+    tracker,
+    content,
+  );
   notes = factCheckResult.notes;
   const verificationSummary = factCheckResult.verificationSummary;
   vaultDedupPending = factCheckResult.vaultDedupPending;
@@ -650,7 +747,13 @@ async function runExtractionPhases(
   }
 
   // Phase 6: 笔记复查（可选）
-  const reviewResult = await runReviewPhase(notes, fullConfig, activeProfileConfig, vaultDedupPending, tracker);
+  const reviewResult = await runReviewPhase(
+    notes,
+    fullConfig,
+    activeProfileConfig,
+    vaultDedupPending,
+    tracker,
+  );
   notes = reviewResult.notes;
   vaultDedupPending = reviewResult.vaultDedupPending;
   const reviewDetails = reviewResult.reviewDetails;
@@ -668,16 +771,17 @@ async function runExtractionPhases(
   }
 
   // 构造 duplicateHints（从 vaultDedupPending 派生）
-  const duplicateHints = vaultDedupPending.length > 0
-    ? vaultDedupPending.map(p => ({
-        noteIndex: p.newNoteIndex,
-        similarity: p.similarity,
-        matchedNote: p.matchedNote,
-        matchedContent: p.matchedContent,
-        newNoteTitle: p.newNoteTitle,
-        newNoteContent: p.newNoteContent,
-      }))
-    : undefined;
+  const duplicateHints =
+    vaultDedupPending.length > 0
+      ? vaultDedupPending.map((p) => ({
+          noteIndex: p.newNoteIndex,
+          similarity: p.similarity,
+          matchedNote: p.matchedNote,
+          matchedContent: p.matchedContent,
+          newNoteTitle: p.newNoteTitle,
+          newNoteContent: p.newNoteContent,
+        }))
+      : undefined;
 
   return {
     success: true,
@@ -697,4 +801,3 @@ async function runExtractionPhases(
     reviewDetails,
   };
 }
-

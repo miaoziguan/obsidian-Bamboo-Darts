@@ -4,14 +4,22 @@
  * 从 panel-view.ts 的 renderAboutPanel 中提取，减少主文件的渲染代码量。
  */
 
-export interface AboutPhase { phase: string; name: string; desc: string }
+export interface AboutPhase {
+  phase: string;
+  name: string;
+  desc: string;
+}
 
 export const ABOUT_PHASES: AboutPhase[] = [
-  ['Phase 1', '读取内容', '从文本、URL 或剪贴板获取原始内容（URL 经 80+ 选择器降噪）'],
+  ['Phase 1', '读取内容', '从文本、URL 或剪贴板获取原始内容（URL 经 100+ 选择器降噪）'],
   ['Phase 2', '质量门控', '多维规则前置过滤低质/噪声内容，累积≥3条警告升级阻断'],
   ['Phase 3', 'AI 提炼', '调用 DeepSeek 将内容拆解为原子笔记，5xx/网络错误自动重试'],
   ['Phase 4', '同批去重', 'BM25 + 分词 + 余弦相似度，检测同批次高度相似笔记'],
-  ['Phase 4b', '知识库去重', 'SimHash 指纹预过滤 + BM25 余弦；开启语义去重（Beta）后，对可疑重复调用腾讯混元向量模型精判'],
+  [
+    'Phase 4b',
+    '知识库去重',
+    'SimHash 指纹预过滤 + BM25 余弦；开启语义去重（Beta）后，对可疑重复调用腾讯混元向量模型精判',
+  ],
   ['Phase 5', '内容核查', '三层管线：原文溯源 → 语义比对 → 超源标记'],
   ['Phase 6', '笔记复查', '洞见 + 知识直加（2-10），四级制分级过滤'],
 ];
@@ -46,4 +54,3 @@ export const ABOUT_SCORE_DIMS: [string, string][] = [
   ['洞见价值', '是否包含独立见解、反直觉判断或有价值的观点'],
   ['知识价值', '是否提供可学习的新领域知识或方法论'],
 ];
-

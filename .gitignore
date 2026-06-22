@@ -19,5 +19,8 @@ release-notes-*.md
 .vscode/
 *.swp
 
+# Test coverage reports
+coverage/
+
 # Environment
 .env

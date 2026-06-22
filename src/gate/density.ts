@@ -9,7 +9,7 @@ export function checkDensity(
   content: string,
   tokenMap: Map<string, number>,
   minDensity: number = GATE_MIN_DENSITY,
-  warnDensity: number = GATE_WARN_DENSITY
+  warnDensity: number = GATE_WARN_DENSITY,
 ): GateResult {
   const total = Array.from(tokenMap.values()).reduce((a, b) => a + b, 0);
   if (total < 20) return ok();

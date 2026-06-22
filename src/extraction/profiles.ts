@@ -71,11 +71,11 @@ export interface ProfileConfig {
 export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
   dense: {
     crossBatchThreshold: 0.75,
-    vaultHighThreshold: 0.80,
+    vaultHighThreshold: 0.8,
     vaultMidThreshold: 0.65,
     reviewMinScore: 4,
     gateMinDensity: 0.15,
-    gateWarnDensity: 0.50,
+    gateWarnDensity: 0.5,
     gateMaxNoiseRatio: 0.75,
     gateWarnNoiseRatio: 0.45,
     // 技术文档允许更短（代码片段、定义等）
@@ -106,20 +106,20 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
   },
   balanced: {
     crossBatchThreshold: 0.65,
-    vaultHighThreshold: 0.70,
+    vaultHighThreshold: 0.7,
     vaultMidThreshold: 0.55,
     reviewMinScore: 6,
     gateMinDensity: 0.15,
-    gateWarnDensity: 0.50,
-    gateMaxNoiseRatio: 0.70,
-    gateWarnNoiseRatio: 0.40,
+    gateWarnDensity: 0.5,
+    gateMaxNoiseRatio: 0.7,
+    gateWarnNoiseRatio: 0.4,
     // 通用文章默认阈值
     gateMinLength: 80,
     gateWarnLength: 300,
     // 通用文章建议不超过 50000 字
     gateMaxLength: 50000,
     gateWarnMaxLength: 20000,
-    gateLinkBlockRatio: 0.40,
+    gateLinkBlockRatio: 0.4,
     gateLinkBlockDensity: 1.0,
     gateQualityBlockCount: 3,
     gateQualityWarnCount: 1,
@@ -137,11 +137,11 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
   },
   sparse: {
     crossBatchThreshold: 0.55,
-    vaultHighThreshold: 0.60,
+    vaultHighThreshold: 0.6,
     vaultMidThreshold: 0.45,
     reviewMinScore: 7,
     gateMinDensity: 0.15,
-    gateWarnDensity: 0.50,
+    gateWarnDensity: 0.5,
     gateMaxNoiseRatio: 0.65,
     gateWarnNoiseRatio: 0.35,
     // 观点/评论允许更短（一句话观点也有价值）
@@ -218,7 +218,7 @@ function countCodeBlocks(text: string): number {
 function technicalTermDensity(text: string): number {
   const charCount = text.length || 1;
   const englishWords = text.match(/\b[a-zA-Z]{3,}\b/g) || [];
-  const filteredEnglish = englishWords.filter(w => !STOP_WORDS.has(w.toLowerCase()));
+  const filteredEnglish = englishWords.filter((w) => !STOP_WORDS.has(w.toLowerCase()));
 
   // 斜杠分隔术语，如 client/server、TCP/IP
   const slashTerms = text.match(/[a-zA-Z]+\/[a-zA-Z]+/g) || [];
@@ -238,25 +238,39 @@ function dataDensity(text: string): number {
 
   // 百分比：12.5%、约 30%
   for (const m of text.matchAll(/(?:约|近|超|达)?\d+(?:\.\d+)?%/g)) {
-    if (!seen.has(m[0])) { seen.add(m[0]); count++; }
+    if (!seen.has(m[0])) {
+      seen.add(m[0]);
+      count++;
+    }
   }
 
   // 数值 + 工程单位：2300V、1500V DC、3.3kV、100kW、50kWh、0.3Ω
-  for (const m of text.matchAll(/\d+(?:\.\d+)?\s*(?:mV|kV|V|mW|kW|MW|GW|TW|W|mWh|kWh|MWh|GWh|mA|kA|A|Ω|mΩ|Hz|kHz|MHz|GHz|μF|mF|nF|pF|°C|°F|mm|cm|m|km|kg|t|Pa|kPa|MPa|bar|ppm|ppb|dB|dBm)/gi)) {
-    if (!seen.has(m[0])) { seen.add(m[0]); count++; }
+  for (const m of text.matchAll(
+    /\d+(?:\.\d+)?\s*(?:mV|kV|V|mW|kW|MW|GW|TW|W|mWh|kWh|MWh|GWh|mA|kA|A|Ω|mΩ|Hz|kHz|MHz|GHz|μF|mF|nF|pF|°C|°F|mm|cm|m|km|kg|t|Pa|kPa|MPa|bar|ppm|ppb|dB|dBm)/gi,
+  )) {
+    if (!seen.has(m[0])) {
+      seen.add(m[0]);
+      count++;
+    }
   }
 
   // 年份和日期：2024年、2025-03、2024/06/15（排除更长数字的子串）
   for (const m of text.matchAll(/(?<!\d)\d{4}(?:[-\/年]\d{1,2}(?:[-\/月]\d{1,2})?)?(?!\d)/g)) {
     const year = parseInt(m[0]);
     if (year >= 1900 && year <= 2100 && !seen.has(m[0])) {
-      seen.add(m[0]); count++;
+      seen.add(m[0]);
+      count++;
     }
   }
 
   // 中文量级单位：亿元、万人、GW 级、百万台
-  for (const m of text.matchAll(/\d+(?:\.\d+)?\s*(?:万亿|亿|千万|百万|万|千)\s*(?:元|美元|欧元|人|台|套|条|座|个|辆|次)?/g)) {
-    if (!seen.has(m[0])) { seen.add(m[0]); count++; }
+  for (const m of text.matchAll(
+    /\d+(?:\.\d+)?\s*(?:万亿|亿|千万|百万|万|千)\s*(?:元|美元|欧元|人|台|套|条|座|个|辆|次)?/g,
+  )) {
+    if (!seen.has(m[0])) {
+      seen.add(m[0]);
+      count++;
+    }
   }
 
   return (count / charCount) * 1000;
@@ -264,7 +278,7 @@ function dataDensity(text: string): number {
 
 /** 段落平均长度（字） */
 function avgParagraphLength(text: string): number {
-  const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+  const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
   if (paragraphs.length === 0) return 0;
   const totalChars = paragraphs.reduce((sum, p) => sum + p.trim().length, 0);
   return totalChars / paragraphs.length;
@@ -275,11 +289,36 @@ function narrativeWordDensity(text: string): number {
   const charCount = text.length || 1;
   // 常见叙事/情感/过渡词汇
   const NARRATIVE_PATTERNS = [
-    /然而/g, /但是/g, /却/g, /不禁/g, /渐渐/g, /终于/g,
-    /忽然/g, /突然/g, /似乎/g, /仿佛/g, /依然/g, /仍然/g,
-    /默默/g, /悄悄/g, /缓缓/g, /淡淡/g, /深深/g, /轻轻/g,
-    /回忆/g, /想起/g, /记得/g, /故事/g, /情感/g, /感受/g,
-    /心情/g, /思绪/g, /目光/g, /微笑/g, /沉默/g, /叹息/g,
+    /然而/g,
+    /但是/g,
+    /却/g,
+    /不禁/g,
+    /渐渐/g,
+    /终于/g,
+    /忽然/g,
+    /突然/g,
+    /似乎/g,
+    /仿佛/g,
+    /依然/g,
+    /仍然/g,
+    /默默/g,
+    /悄悄/g,
+    /缓缓/g,
+    /淡淡/g,
+    /深深/g,
+    /轻轻/g,
+    /回忆/g,
+    /想起/g,
+    /记得/g,
+    /故事/g,
+    /情感/g,
+    /感受/g,
+    /心情/g,
+    /思绪/g,
+    /目光/g,
+    /微笑/g,
+    /沉默/g,
+    /叹息/g,
   ];
   let count = 0;
   for (const pattern of NARRATIVE_PATTERNS) {

@@ -18,7 +18,7 @@ const HTML_WARN_COUNT = 2;
 export function checkHtmlArtifacts(
   content: string,
   blockCount: number = HTML_BLOCK_COUNT,
-  warnCount: number = HTML_WARN_COUNT
+  warnCount: number = HTML_WARN_COUNT,
 ): GateResult {
   let totalHits = 0;
   const found: string[] = [];

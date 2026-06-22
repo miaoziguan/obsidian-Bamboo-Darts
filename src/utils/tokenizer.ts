@@ -18,7 +18,7 @@ function forwardMaxMatch(text: string): string[] {
   let i = 0;
   while (i < text.length) {
     let matched = text[i]; // fallback: 单字
-    let maxLen = Math.min(5, text.length - i);
+    const maxLen = Math.min(5, text.length - i);
     for (let len = maxLen; len >= 2; len--) {
       const candidate = text.slice(i, i + len);
       if (CN_WORD_DICT.has(candidate)) {
@@ -49,7 +49,7 @@ export function tokenize(text: string, options?: TokenizeOptions): Map<string, n
   const chunks = normalized
     .replace(/[^\w\s\u4e00-\u9fff]/g, ' ')
     .split(/\s+/)
-    .filter(w => w.length >= 1);
+    .filter((w) => w.length >= 1);
 
   for (const chunk of chunks) {
     if (/[\u4e00-\u9fff]/.test(chunk)) {

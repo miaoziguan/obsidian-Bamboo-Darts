@@ -18,10 +18,17 @@
 import { Vault, TFile } from 'obsidian';
 import { AtomicNote } from './utils/notes-standards';
 import {
-  DEDUP_BATCH_SIZE, DEDUP_CACHE_TTL,
-  MIN_TOKENS_THRESHOLD, CROSS_BATCH_THRESHOLD, IDF_SMOOTH,
-  LENGTH_RATIO_THRESHOLD, SHORT_NOTE_LENGTH, SHORT_NOTE_BOOST_FACTOR,
-  BM25_K1, BM25_B, SIMHASH_HAMMING_THRESHOLD,
+  DEDUP_BATCH_SIZE,
+  DEDUP_CACHE_TTL,
+  MIN_TOKENS_THRESHOLD,
+  CROSS_BATCH_THRESHOLD,
+  IDF_SMOOTH,
+  LENGTH_RATIO_THRESHOLD,
+  SHORT_NOTE_LENGTH,
+  SHORT_NOTE_BOOST_FACTOR,
+  BM25_K1,
+  BM25_B,
+  SIMHASH_HAMMING_THRESHOLD,
 } from './constants';
 import { simhash, hammingDistance } from './utils/simhash';
 import { SemanticDedupManager } from './utils/embedding';
@@ -36,20 +43,11 @@ export { tokenize };
 // ─── TF-IDF 核心 ───
 
 /**
- * 单篇文档的预处理结果
- */
-interface DocVector {
-  tokenCount: number;        // 文档总 token 数
-  tf: Map<string, number>;   // token → 词频（未归一化）
-  norm: number;              // L2 范数（基于最终 tf-idf 计算）
-}
-
-/**
  * 语料库级 IDF 表
  */
 interface IdfTable {
   docCount: number;
-  idf: Map<string, number>;  // token → idf 值
+  idf: Map<string, number>; // token → idf 值
 }
 
 /**
@@ -57,7 +55,10 @@ interface IdfTable {
  * @param docTokens 每篇文档的 token 频次表
  * @param docCount 文档总数（用于平滑，docTokens 可能只是已有笔记）
  */
-function computeIdfTable(docTokens: Array<Map<string, number>>, docCount?: number): IdfTable & { dfCounts: Map<string, number> } {
+function computeIdfTable(
+  docTokens: Array<Map<string, number>>,
+  docCount?: number,
+): IdfTable & { dfCounts: Map<string, number> } {
   const N = docCount || docTokens.length || 1;
   const docFreq = new Map<string, number>();
 
@@ -80,9 +81,9 @@ function computeIdfTable(docTokens: Array<Map<string, number>>, docCount?: numbe
  * 注：我们不存完整向量，而是存 (token → tf-idf) 和范数，用于快速点积
  */
 interface TfIdfVector {
-  weights: Map<string, number>;  // token → tf-idf 权重
-  norm: number;                   // L2 范数
-  tokenCount: number;             // 原始 token 数（用于最小门槛判断）
+  weights: Map<string, number>; // token → tf-idf 权重
+  norm: number; // L2 范数
+  tokenCount: number; // 原始 token 数（用于最小门槛判断）
   /** 提取权重最高的 topN 个 token（用于 Jaccard 关键词比对） */
   topTokens: string[];
 }
@@ -98,12 +99,13 @@ function computeTfIdfVector(
   const k1 = BM25_K1;
   const b = BM25_B;
   // BM25 长度归一化系数（avgDocLen=0 时退化为标准 TF）
-  const lenNorm = avgDocLen > 0 ? (1 - b + b * docLen / avgDocLen) : 1;
+  const lenNorm = avgDocLen > 0 ? 1 - b + (b * docLen) / avgDocLen : 1;
 
   for (const [token, freq] of tokens) {
     // BM25 饱和词频
     const tf = freq / (freq + k1 * lenNorm);
-    const idf = idfTable.idf.get(token) || Math.log((idfTable.docCount + IDF_SMOOTH) / (0 + IDF_SMOOTH)) + 1;
+    const idf =
+      idfTable.idf.get(token) || Math.log((idfTable.docCount + IDF_SMOOTH) / (0 + IDF_SMOOTH)) + 1;
     const weight = tf * idf;
     weights.set(token, weight);
     sumSq += weight * weight;
@@ -130,9 +132,8 @@ function cosineSimilarity(v1: TfIdfVector, v2: TfIdfVector): number {
   if (v1.tokenCount < MIN_TOKENS_THRESHOLD || v2.tokenCount < MIN_TOKENS_THRESHOLD) return 0;
 
   // 遍历较小的向量
-  const [small, large] = v1.weights.size <= v2.weights.size
-    ? [v1.weights, v2.weights]
-    : [v2.weights, v1.weights];
+  const [small, large] =
+    v1.weights.size <= v2.weights.size ? [v1.weights, v2.weights] : [v2.weights, v1.weights];
 
   let dot = 0;
   for (const [token, weight] of small) {
@@ -192,11 +193,11 @@ export interface VaultMatchInfo {
 interface CachedNote {
   path: string;
   content: string;
-  tokens: Map<string, number>;         // token → 频次
-  titleTokens: Map<string, number>;     // 标题 token → 频次（可选）
-  vector: TfIdfVector;                  // 基于知识库语料的 tf-idf 向量
-  titleVector: TfIdfVector | null;      // 标题向量
-  simhashFp: bigint;                    // SimHash 64-bit 指纹
+  tokens: Map<string, number>; // token → 频次
+  titleTokens: Map<string, number>; // 标题 token → 频次（可选）
+  vector: TfIdfVector; // 基于知识库语料的 tf-idf 向量
+  titleVector: TfIdfVector | null; // 标题向量
+  simhashFp: bigint; // SimHash 64-bit 指纹
   mtime: number;
 }
 
@@ -205,7 +206,7 @@ interface DedupCache {
   idfTable: IdfTable;
   /** token → 原始文档频率（用于增量 IDF 更新） */
   dfCounts: Map<string, number>;
-  targetFolder: string;  // 按文件夹隔离缓存
+  targetFolder: string; // 按文件夹隔离缓存
   timestamp: number;
 }
 
@@ -214,7 +215,7 @@ interface DedupCache {
  * 按 targetFolder 独立缓存，避免跨文件夹污染
  */
 class DedupCacheManager {
-  private caches = new Map<string, DedupCache>();  // folder → cache
+  private caches = new Map<string, DedupCache>(); // folder → cache
 
   invalidate(): void {
     this.caches.clear();
@@ -230,12 +231,12 @@ class DedupCacheManager {
     }
 
     // 索引缓存笔记路径
-    const cacheByPath = new Map(cached.notes.map(n => [n.path, n]));
+    const cacheByPath = new Map(cached.notes.map((n) => [n.path, n]));
 
     // 当前 vault 中的文件
     const allFiles = vault.getMarkdownFiles();
-    const folderFiles = allFiles.filter(f => isPathInFolder(f.path, targetFolder));
-    const vaultPathSet = new Set(folderFiles.map(f => f.path));
+    const folderFiles = allFiles.filter((f) => isPathInFolder(f.path, targetFolder));
+    const _vaultPathSet = new Set(folderFiles.map((f) => f.path));
 
     // 删除/变动的文件：移除 DF 贡献并剔除
     for (const note of cached.notes) {
@@ -251,8 +252,8 @@ class DedupCacheManager {
     }
 
     // 无变动 → 直接返回
-    const allValid = cacheByPath.size === cached.notes.length
-      && folderFiles.length === cached.notes.length;
+    const allValid =
+      cacheByPath.size === cached.notes.length && folderFiles.length === cached.notes.length;
     if (allValid) return cached;
 
     // 有变动 → 重建仅变动部分
@@ -282,8 +283,19 @@ class DedupCacheManager {
   }
 
   /** 更新某文件夹的缓存 */
-  set(targetFolder: string, notes: CachedNote[], idfTable: IdfTable, dfCounts: Map<string, number>): void {
-    this.caches.set(targetFolder, { notes, idfTable, dfCounts, targetFolder, timestamp: Date.now() });
+  set(
+    targetFolder: string,
+    notes: CachedNote[],
+    idfTable: IdfTable,
+    dfCounts: Map<string, number>,
+  ): void {
+    this.caches.set(targetFolder, {
+      notes,
+      idfTable,
+      dfCounts,
+      targetFolder,
+      timestamp: Date.now(),
+    });
   }
 }
 
@@ -315,7 +327,8 @@ export function isPathInFolder(filePath: string, targetFolder: string): boolean 
 
 /** 字符级编辑距离（Levenshtein），归一化为相似度 */
 function editSimilarity(a: string, b: string): number {
-  const m = a.length, n = b.length;
+  const m = a.length,
+    n = b.length;
   if (m === 0 || n === 0) return 0;
 
   let prev = new Uint16Array(n + 1);
@@ -347,20 +360,22 @@ export function crossCheckBatch(notes: AtomicNote[], threshold?: number): DedupR
   const duplicates: DuplicateInfo[] = [];
 
   // 1. Token 化所有笔记
-  const docTokens = notes.map(n => tokenize(n.content));
+  const docTokens = notes.map((n) => tokenize(n.content));
 
   // 2. 以当前 batch 为语料计算 IDF（小语料，但足以区分相对重要性）
   const idfTable = computeIdfTable(docTokens);
   const avgLen = notes.reduce((s, n) => s + n.content.length, 0) / Math.max(notes.length, 1);
 
   // 3. 预计算所有笔记的 TF-IDF 向量
-  const vectors = docTokens.map((tokens, i) => computeTfIdfVector(tokens, idfTable, notes[i].content.length, avgLen));
+  const vectors = docTokens.map((tokens, i) =>
+    computeTfIdfVector(tokens, idfTable, notes[i].content.length, avgLen),
+  );
 
   // 4. 交叉比对
   for (let i = 0; i < notes.length; i++) {
     const note = notes[i];
     const vec = vectors[i];
-      const length = note.content.length;
+    const length = note.content.length;
     let isDuplicate = false;
     let bestMatch: DuplicateInfo | null = null;
     const isShortNote = length < SHORT_NOTE_LENGTH;
@@ -433,7 +448,7 @@ async function loadAndPreprocessExistingNotes(
   targetFolder: string,
 ): Promise<{ notes: CachedNote[]; idfTable: IdfTable; dfCounts: Map<string, number> }> {
   const allFiles = vault.getMarkdownFiles();
-  const existingFiles = allFiles.filter(file => isPathInFolder(file.path, targetFolder));
+  const existingFiles = allFiles.filter((file) => isPathInFolder(file.path, targetFolder));
 
   // 分批读取
   const allTokens: Array<Map<string, number>> = [];
@@ -441,7 +456,7 @@ async function loadAndPreprocessExistingNotes(
 
   for (let i = 0; i < existingFiles.length; i += DEDUP_BATCH_SIZE) {
     const batch = existingFiles.slice(i, i + DEDUP_BATCH_SIZE);
-    const contents = await Promise.all(batch.map(f => vault.read(f)));
+    const contents = await Promise.all(batch.map((f) => vault.read(f)));
     for (let j = 0; j < batch.length; j++) {
       const file = batch[j] as TFile;
       const content = contents[j];
@@ -454,7 +469,7 @@ async function loadAndPreprocessExistingNotes(
       }
       if (!title) {
         const headingMatch = content.match(/^#\s+(.+)$/m);
-        title = headingMatch ? headingMatch[1].trim() : (content.split('\n')[0]?.trim() || '');
+        title = headingMatch ? headingMatch[1].trim() : content.split('\n')[0]?.trim() || '';
       }
       rawNotes.push({ path: file.path, content, title, mtime: file.stat.mtime });
       allTokens.push(tokenize(content));
@@ -463,16 +478,18 @@ async function loadAndPreprocessExistingNotes(
 
   // 计算 IDF（基于整个目标文件夹的语料）
   const idfTable = computeIdfTable(allTokens, allTokens.length || 1);
-  const avgLen = rawNotes.reduce((s, rn) => s + rn.content.length, 0) / Math.max(rawNotes.length, 1);
+  const avgLen =
+    rawNotes.reduce((s, rn) => s + rn.content.length, 0) / Math.max(rawNotes.length, 1);
 
   // 计算每篇文档的 TF-IDF 向量
   const notes: CachedNote[] = rawNotes.map((rn, idx) => {
     const tokens = allTokens[idx];
     const vector = computeTfIdfVector(tokens, idfTable, rn.content.length, avgLen);
     const titleTokens = tokenize(rn.title);
-    const titleVector = titleTokens.size >= MIN_TOKENS_THRESHOLD
-      ? computeTfIdfVector(titleTokens, idfTable, rn.title.length, avgLen)
-      : null;
+    const titleVector =
+      titleTokens.size >= MIN_TOKENS_THRESHOLD
+        ? computeTfIdfVector(titleTokens, idfTable, rn.title.length, avgLen)
+        : null;
     return {
       path: rn.path,
       content: rn.content,
@@ -521,26 +538,45 @@ export async function checkAgainstVaultDetailed(
   // 计算整体平均文档长度（BM25 用）
   const vaultTotalLen = existingNotes.reduce((s, n) => s + n.content.length, 0);
   const newTotalLen = notes.reduce((s, n) => s + n.content.length, 0);
-  const avgDocLen = (vaultTotalLen + newTotalLen) /
-    Math.max(existingNotes.length + notes.length, 1);
+  const avgDocLen =
+    (vaultTotalLen + newTotalLen) / Math.max(existingNotes.length + notes.length, 1);
 
   // 新笔记预处理
-  const newNoteVectors: Array<{ vec: TfIdfVector; titleVec: TfIdfVector | null; length: number; simhashFp: bigint; topTokens: string[] }> = [];
+  const newNoteVectors: Array<{
+    vec: TfIdfVector;
+    titleVec: TfIdfVector | null;
+    length: number;
+    simhashFp: bigint;
+    topTokens: string[];
+  }> = [];
   for (const note of notes) {
     const contentTokens = tokenize(note.content);
     const titleTokens = tokenize(note.title);
     const vec = computeTfIdfVector(contentTokens, idfTable, note.content.length, avgDocLen);
-    const titleVec = titleTokens.size >= MIN_TOKENS_THRESHOLD
-      ? computeTfIdfVector(titleTokens, idfTable, note.title.length, avgDocLen)
-      : null;
-    newNoteVectors.push({ vec, titleVec, length: note.content.length, simhashFp: simhash(vec.weights), topTokens: vec.topTokens });
+    const titleVec =
+      titleTokens.size >= MIN_TOKENS_THRESHOLD
+        ? computeTfIdfVector(titleTokens, idfTable, note.title.length, avgDocLen)
+        : null;
+    newNoteVectors.push({
+      vec,
+      titleVec,
+      length: note.content.length,
+      simhashFp: simhash(vec.weights),
+      topTokens: vec.topTokens,
+    });
   }
 
   const results: VaultMatchInfo[] = [];
 
   for (let idx = 0; idx < notes.length; idx++) {
     const note = notes[idx];
-    const { vec: contentVec, titleVec: newTitleVec, length, simhashFp, topTokens } = newNoteVectors[idx];
+    const {
+      vec: contentVec,
+      titleVec: newTitleVec,
+      length,
+      simhashFp,
+      topTokens,
+    } = newNoteVectors[idx];
     let bestMatch: VaultMatchInfo['bestMatch'] = null;
 
     // SimHash 预过滤：只比对汉明距离 < 3 的候选
@@ -548,7 +584,10 @@ export async function checkAgainstVaultDetailed(
       if (hammingDistance(simhashFp, existing.simhashFp) >= SIMHASH_HAMMING_THRESHOLD) continue;
 
       // 长度预过滤
-      if (Math.abs(length - existing.content.length) / Math.max(length, existing.content.length) > LENGTH_RATIO_THRESHOLD) {
+      if (
+        Math.abs(length - existing.content.length) / Math.max(length, existing.content.length) >
+        LENGTH_RATIO_THRESHOLD
+      ) {
         continue;
       }
 
@@ -593,10 +632,10 @@ export async function checkAgainstVaultDetailed(
   if (semanticManager) {
     // 获取知识库文件列表
     const allFiles = vault.getMarkdownFiles();
-    const vaultFiles = allFiles.filter(f => isPathInFolder(f.path, targetFolder));
+    const vaultFiles = allFiles.filter((f) => isPathInFolder(f.path, targetFolder));
 
     // 构造预加载参数（含懒加载的内容读取回调）
-    const preloadItems = vaultFiles.map(f => ({
+    const preloadItems = vaultFiles.map((f) => ({
       path: f.path,
       mtime: f.stat.mtime,
       getContent: async () => await vault.read(f),
@@ -606,7 +645,7 @@ export async function checkAgainstVaultDetailed(
     const vaultVectors = await semanticManager.preloadVaultVectors(preloadItems);
 
     // 批量获取新笔记的语义最佳匹配
-    const newContents = notes.map(n => n.content);
+    const newContents = notes.map((n) => n.content);
     const semanticMatches = await semanticManager.findBestMatches(newContents, vaultVectors);
 
     // 用语义匹配结果增强本地结果
@@ -634,7 +673,7 @@ export async function checkAgainstVaultDetailed(
           matchedContent = await vault.read(matchedFile);
         }
         results[idx].bestMatch = {
-          similarity: semSim,  // ✅ 用语义相似度（更高）
+          similarity: semSim, // ✅ 用语义相似度（更高）
           path: semMatch.path,
           content: matchedContent.slice(0, 200) + (matchedContent.length > 200 ? '...' : ''),
         };
@@ -646,4 +685,3 @@ export async function checkAgainstVaultDetailed(
 
   return results;
 }
-

@@ -23,7 +23,7 @@ const DEFAULT_CONFIG: StorageConfig = {
 async function ensureFolder(app: App, folderPath: string): Promise<void> {
   const normalizedPath = normalizePath(folderPath);
   const folder = app.vault.getAbstractFileByPath(normalizedPath);
-  
+
   if (!folder) {
     await app.vault.createFolder(normalizedPath);
   }
@@ -38,13 +38,13 @@ export function generateFileName(template: string, note: AtomicNote): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const time = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-  
+
   let fileName = safeTemplate
     .replace(/{{title}}/g, sanitizeFileName(note.title))
     .replace(/{{date}}/g, date)
     .replace(/{{time}}/g, time)
     .replace(/{{timestamp}}/g, String(Date.now()));
-  
+
   // 兜底：如果替换后为空，用标题或时间戳
   if (!fileName.trim()) {
     fileName = sanitizeFileName(note.title) || `note-${Date.now()}`;
@@ -79,7 +79,7 @@ export function escapeYamlValue(value: string): string {
 /** 将原子笔记格式化为 Markdown（@internal 暴露给测试） */
 export function formatNoteAsMarkdown(note: AtomicNote): string {
   const lines: string[] = [];
-  
+
   // YAML frontmatter（Bug #9 修复：转义特殊字符）
   lines.push('---');
   lines.push(`title: ${escapeYamlValue(note.title)}`);
@@ -99,8 +99,8 @@ export function formatNoteAsMarkdown(note: AtomicNote): string {
 
   // 正文（清理 AI 可能输出的来源行）
   const cleanedContent = note.content
-    .replace(/\n?---\n?来源[：:]\s*.+$/m, '')  // 去掉末尾的 --- + 来源行
-    .replace(/\n?来源[：:]\s*.+$/m, '')          // 去掉单独的来源行
+    .replace(/\n?---\n?来源[：:]\s*.+$/m, '') // 去掉末尾的 --- + 来源行
+    .replace(/\n?来源[：:]\s*.+$/m, '') // 去掉单独的来源行
     .trim();
   lines.push(cleanedContent || note.content);
 
@@ -109,7 +109,7 @@ export function formatNoteAsMarkdown(note: AtomicNote): string {
 
 /**
  * 批量存储原子笔记（优化版）
- * 
+ *
  * 优化策略：
  * - 预检查目标文件夹中已存在的文件列表
  * - 避免每条笔记单独检查文件存在性
@@ -117,7 +117,7 @@ export function formatNoteAsMarkdown(note: AtomicNote): string {
 export async function saveNotes(
   app: App,
   notes: AtomicNote[],
-  config: Partial<StorageConfig> = {}
+  config: Partial<StorageConfig> = {},
 ): Promise<{
   success: number;
   failed: number;
@@ -146,8 +146,8 @@ export async function saveNotes(
     const existingFiles = app.vault.getMarkdownFiles();
     const existingPaths = new Set(
       existingFiles
-        .filter(f => f.path.startsWith(fullConfig.targetFolder + '/'))
-        .map(f => f.path)
+        .filter((f) => f.path.startsWith(fullConfig.targetFolder + '/'))
+        .map((f) => f.path),
     );
 
     // 批量生成文件名和内容

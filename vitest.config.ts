@@ -5,6 +5,18 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    setupFiles: ['./tests/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary', 'json'],
+      reportsDirectory: 'coverage',
+      include: ['src/**/*.ts'],
+      exclude: [
+        'src/main.ts',
+        'src/ui/**',
+        'src/types.ts',
+      ],
+    },
   },
   resolve: {
     alias: {

@@ -14,11 +14,7 @@
  */
 
 import { requestUrl } from 'obsidian';
-import {
-  HUNYUAN_EMBEDDING_URL,
-  EMBEDDING_DIM,
-  EMBEDDING_BATCH_SIZE,
-} from '../constants';
+import { HUNYUAN_EMBEDDING_URL, EMBEDDING_DIM, EMBEDDING_BATCH_SIZE } from '../constants';
 
 // ─── 常量 ───
 
@@ -36,7 +32,7 @@ const RETRY_BASE_DELAY = 500;
 
 /** 休眠（毫秒） */
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ─── 类型 ───
@@ -86,10 +82,7 @@ function isRetriable(status: number): boolean {
  * 带重试的批次 API 调用
  * @returns 向量数组，失败时返回标记向量（vec[0] === FAILED_VECTOR_MARKER）
  */
-async function fetchBatchWithRetry(
-  batch: string[],
-  config: EmbeddingConfig,
-): Promise<number[][]> {
+async function fetchBatchWithRetry(batch: string[], config: EmbeddingConfig): Promise<number[][]> {
   const url = config.apiUrl || HUNYUAN_EMBEDDING_URL;
 
   for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
@@ -98,7 +91,7 @@ async function fetchBatchWithRetry(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({
         model: 'hunyuan-embedding',
@@ -131,7 +124,9 @@ async function fetchBatchWithRetry(
     // 可重试的错误：等待后重试
     if (attempt < MAX_RETRY) {
       const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
-      console.warn(`[Embedding] API 调用失败（${response.status}），${delay}ms 后重试（${attempt + 1}/${MAX_RETRY}）`);
+      console.warn(
+        `[Embedding] API 调用失败（${response.status}），${delay}ms 后重试（${attempt + 1}/${MAX_RETRY}）`,
+      );
       await sleep(delay);
       continue;
     } else {
@@ -250,7 +245,7 @@ export class SemanticDedupManager {
    */
   async cleanStaleCache(validFiles: Array<{ path: string; mtime: number }>): Promise<number> {
     const cache = await this.ensureCache();
-    const validSet = new Set(validFiles.map(f => cacheKey(f.path, f.mtime)));
+    const validSet = new Set(validFiles.map((f) => cacheKey(f.path, f.mtime)));
     const keys = Object.keys(cache.embeddings);
     let removed = 0;
     for (const key of keys) {
@@ -276,7 +271,12 @@ export class SemanticDedupManager {
   ): Promise<Map<string, number[]>> {
     const cache = await this.ensureCache();
     const result = new Map<string, number[]>();
-    const toFetch: { index: number; path: string; mtime: number; getContent: () => Promise<string> }[] = [];
+    const toFetch: {
+      index: number;
+      path: string;
+      mtime: number;
+      getContent: () => Promise<string>;
+    }[] = [];
 
     // 第一轮：收集缓存命中的，收集缓存未命中的
     for (let i = 0; i < files.length; i++) {
@@ -294,7 +294,7 @@ export class SemanticDedupManager {
 
     if (toFetch.length > 0) {
       // 并行读取未命中文件的内容（相比串行，大量文件时显著更快）
-      const contents = await Promise.all(toFetch.map(entry => entry.getContent()));
+      const contents = await Promise.all(toFetch.map((entry) => entry.getContent()));
 
       // 批量调用 API（内建重试）
       const vectors = await fetchEmbeddings(contents, this.config);
@@ -321,7 +321,7 @@ export class SemanticDedupManager {
     }
 
     // 清理失效缓存（已删除/重命名的文件残留）
-    await this.cleanStaleCache(files.map(f => ({ path: f.path, mtime: f.mtime })));
+    await this.cleanStaleCache(files.map((f) => ({ path: f.path, mtime: f.mtime })));
 
     return result;
   }
@@ -343,7 +343,7 @@ export class SemanticDedupManager {
     // 批量获取新笔记向量（一次 API 调用，内建重试）
     const newVecs = await fetchEmbeddings(newNoteContents, this.config);
 
-    return newVecs.map(newVec => {
+    return newVecs.map((newVec) => {
       // 检查是否为失败标记向量（API 调用失败）
       const isFailed = newVec[0] === FAILED_VECTOR_MARKER;
       if (isFailed) return null;
@@ -380,4 +380,3 @@ export class SemanticDedupManager {
     return Object.keys(cache.embeddings).length;
   }
 }
-

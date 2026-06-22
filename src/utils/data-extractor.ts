@@ -6,7 +6,11 @@ import { MAX_CLAIMS_PER_CHECK } from '../constants';
 const DATA_PATTERNS: { regex: RegExp; type: string }[] = [
   { regex: /(?:约|近|超|达|不足)?百分之[\d一二三四五六七八九十百千]+/g, type: 'percent' },
   { regex: /(?:约|近|超|达|不足)?\d+(?:\.\d+)?%/g, type: 'percent' },
-  { regex: /\d+(?:\.\d+)?\s*(?:万亿|万|亿|千|百)?(?:美元|欧元|日元|英镑|人民币|元|美元|人|个|年|月|天|小时|kg|km|m|cm|mm)/g, type: 'quantity' },
+  {
+    regex:
+      /\d+(?:\.\d+)?\s*(?:万亿|万|亿|千|百)?(?:美元|欧元|日元|英镑|人民币|元|美元|人|个|年|月|天|小时|kg|km|m|cm|mm)/g,
+    type: 'quantity',
+  },
   { regex: /\d{4}[-\/年]\d{1,2}[-\/月]\d{1,2}/g, type: 'date' },
   { regex: /\d{4}年\d{1,2}月\d{1,2}日/g, type: 'date' },
   { regex: /\d{1,2}月\d{1,2}日/g, type: 'date' },
@@ -16,15 +20,34 @@ const DATA_PATTERNS: { regex: RegExp; type: string }[] = [
 
 /** 命名实体模式：中文机构名、英文连续大写词组 */
 const ENTITY_PATTERNS: { regex: RegExp; type: string }[] = [
-  { regex: /[\u4e00-\u9fff]{2,6}(?:公司|机构|大学|学院|集团|基金|协会|部门|委员会|平台|系统|框架|协议|标准|组织|银行|医院|研究所|实验室)/g, type: 'org_cn' },
+  {
+    regex:
+      /[\u4e00-\u9fff]{2,6}(?:公司|机构|大学|学院|集团|基金|协会|部门|委员会|平台|系统|框架|协议|标准|组织|银行|医院|研究所|实验室)/g,
+    type: 'org_cn',
+  },
   { regex: /[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+/g, type: 'org_en' },
 ];
 
 /** 因果/证据声明关键词 */
 const CAUSAL_KEYWORDS = [
-  '导致', '使得', '造成', '引起', '证明', '发现', '表明', '显示',
-  '研究结果', '数据表明', '统计显示', '调查指出', '报告指出',
-  '因此', '所以', '由此可见', '这说明了', '这意味着',
+  '导致',
+  '使得',
+  '造成',
+  '引起',
+  '证明',
+  '发现',
+  '表明',
+  '显示',
+  '研究结果',
+  '数据表明',
+  '统计显示',
+  '调查指出',
+  '报告指出',
+  '因此',
+  '所以',
+  '由此可见',
+  '这说明了',
+  '这意味着',
 ];
 
 export interface VerifiableClaim {
@@ -90,7 +113,9 @@ export function extractVerifiableClaims(content: string): VerifiableClaim[] {
 
   const limited = claims.slice(0, MAX_CLAIMS_PER_CHECK);
   if (claims.length > MAX_CLAIMS_PER_CHECK) {
-    console.warn(`[核查] 可验证声明 ${claims.length} 条，超出上限 ${MAX_CLAIMS_PER_CHECK}，已截断，剩余 ${claims.length - MAX_CLAIMS_PER_CHECK} 条未核查`);
+    console.warn(
+      `[核查] 可验证声明 ${claims.length} 条，超出上限 ${MAX_CLAIMS_PER_CHECK}，已截断，剩余 ${claims.length - MAX_CLAIMS_PER_CHECK} 条未核查`,
+    );
   }
   return limited;
 }

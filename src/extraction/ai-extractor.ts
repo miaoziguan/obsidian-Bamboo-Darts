@@ -6,7 +6,12 @@
 
 import { requestUrl } from 'obsidian';
 import type { ExtractorConfig } from '../extractor';
-import { AtomicNote, parseAINoteOutput, validateAtomicNote, ensureTags } from '../utils/notes-standards';
+import {
+  AtomicNote,
+  parseAINoteOutput,
+  validateAtomicNote,
+  ensureTags,
+} from '../utils/notes-standards';
 import { buildSystemPrompt, buildExtractionPrompt } from './tag-preferences';
 import { AI_TEMPERATURE, INPUT_TRUNCATE_LENGTH } from '../constants';
 
@@ -28,7 +33,7 @@ const DEFAULT_CONFIG: ExtractorConfig = {
 
 export async function extractAtomicNotes(
   content: string,
-  config: Partial<ExtractorConfig> = {}
+  config: Partial<ExtractorConfig> = {},
 ): Promise<{ success: boolean; notes?: AtomicNote[]; error?: string }> {
   const fullConfig: ExtractorConfig = { ...DEFAULT_CONFIG, ...config };
 
@@ -37,7 +42,10 @@ export async function extractAtomicNotes(
   }
 
   const systemPrompt = buildSystemPrompt(fullConfig.tagPreferences, fullConfig.tagMode);
-  const userPrompt = buildExtractionPrompt(content, fullConfig.inputTruncateLength || INPUT_TRUNCATE_LENGTH);
+  const userPrompt = buildExtractionPrompt(
+    content,
+    fullConfig.inputTruncateLength || INPUT_TRUNCATE_LENGTH,
+  );
 
   const RETRY_DELAY_MS = 500;
 
@@ -45,7 +53,7 @@ export async function extractAtomicNotes(
     try {
       if (attempt > 0) {
         console.warn(`[提炼] 第 ${attempt + 1} 次尝试（重试）...`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
       }
 
       const response = await requestUrl({
@@ -53,7 +61,7 @@ export async function extractAtomicNotes(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${fullConfig.deepseekApiKey}`,
+          Authorization: `Bearer ${fullConfig.deepseekApiKey}`,
         },
         body: JSON.stringify({
           model: fullConfig.model,
@@ -85,7 +93,9 @@ export async function extractAtomicNotes(
         console.warn('[提炼] 严格模式解析失败，尝试宽松模式降级...');
         const fallbackNotes = parseAINoteOutput(aiContent, true);
         if (fallbackNotes.length > 0) {
-          console.warn(`[提炼] 宽松模式成功解析 ${fallbackNotes.length} 条笔记（可能包含质量较低的标题）`);
+          console.warn(
+            `[提炼] 宽松模式成功解析 ${fallbackNotes.length} 条笔记（可能包含质量较低的标题）`,
+          );
           notes.push(...fallbackNotes);
         } else {
           console.warn('[提炼] 宽松模式也失败，AI 输出可能格式异常');
@@ -93,17 +103,20 @@ export async function extractAtomicNotes(
       }
 
       // Phase 3.5: 校验笔记质量
-      const validationResults = notes.map(note => ({
+      const validationResults = notes.map((note) => ({
         note,
         validation: validateAtomicNote(note),
       }));
 
       const validNotes = validationResults
-        .filter(item => item.validation.valid)
-        .map(item => item.note);
+        .filter((item) => item.validation.valid)
+        .map((item) => item.note);
 
       if (validNotes.length === 0 && notes.length > 0) {
-        const reasons = validationResults.map(item => item.validation.issues.join('; ')).filter(Boolean).join(' | ');
+        const reasons = validationResults
+          .map((item) => item.validation.issues.join('; '))
+          .filter(Boolean)
+          .join(' | ');
         return { success: false, error: `AI 输出的笔记校验失败: ${reasons}` };
       }
 
@@ -112,7 +125,9 @@ export async function extractAtomicNotes(
       return { success: true, notes: validNotes };
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const isRetryable = /5\d{2}|ETIMEDOUT|ECONNREFUSED|ECONNRESET|Failed to fetch|network/i.test(errorMsg);
+      const isRetryable = /5\d{2}|ETIMEDOUT|ECONNREFUSED|ECONNRESET|Failed to fetch|network/i.test(
+        errorMsg,
+      );
       if (isRetryable && attempt === 0) {
         console.warn(`[提炼] 可重试错误: ${errorMsg}，${RETRY_DELAY_MS}ms 后重试...`);
         continue;

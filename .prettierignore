@@ -1,0 +1,8 @@
+// Prettier 忽略构建产物和配置
+node_modules/
+main.js
+*.json
+*.md
+*.css
+*.yml
+*.yaml

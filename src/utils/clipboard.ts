@@ -9,7 +9,10 @@ export function stripImageNoise(text: string): string {
   cleaned = cleaned.replace(/<figure[\s\S]*?<\/figure>/gi, '');
   cleaned = cleaned.replace(/<figcaption[\s\S]*?<\/figcaption>/gi, '');
   cleaned = cleaned.replace(/<picture[\s\S]*?<\/picture>/gi, '');
-  cleaned = cleaned.replace(/^https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)(?:\?[^\s]*)?$/gim, '');
+  cleaned = cleaned.replace(
+    /^https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)(?:\?[^\s]*)?$/gim,
+    '',
+  );
   cleaned = cleaned.replace(/^[\w-]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)\s*$/gim, '');
   cleaned = cleaned.replace(/^图(?:片)?\s*$/gim, '');
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
