@@ -462,17 +462,16 @@ async function loadAndPreprocessExistingNotes(
   }
 
   // 计算 IDF（基于整个目标文件夹的语料）
-  const idfResult = computeIdfTable(allTokens, allTokens.length || 1);
-  const { idf: idfTable } = idfResult;
+  const idfTable = computeIdfTable(allTokens, allTokens.length || 1);
   const avgLen = rawNotes.reduce((s, rn) => s + rn.content.length, 0) / Math.max(rawNotes.length, 1);
 
   // 计算每篇文档的 TF-IDF 向量
   const notes: CachedNote[] = rawNotes.map((rn, idx) => {
     const tokens = allTokens[idx];
-    const vector = computeTfIdfVector(tokens, idfResult, rn.content.length, avgLen);
+    const vector = computeTfIdfVector(tokens, idfTable, rn.content.length, avgLen);
     const titleTokens = tokenize(rn.title);
     const titleVector = titleTokens.size >= MIN_TOKENS_THRESHOLD
-      ? computeTfIdfVector(titleTokens, idfResult, rn.title.length, avgLen)
+      ? computeTfIdfVector(titleTokens, idfTable, rn.title.length, avgLen)
       : null;
     return {
       path: rn.path,
@@ -486,7 +485,7 @@ async function loadAndPreprocessExistingNotes(
     };
   });
 
-  return { notes, idfTable, dfCounts: idfResult.dfCounts };
+  return { notes, idfTable, dfCounts: idfTable.dfCounts };
 }
 
 /**
