@@ -81,14 +81,21 @@ export function buildSystemPrompt(
 export function buildExtractionPrompt(
   content: string,
   truncateLength: number = INPUT_TRUNCATE_LENGTH,
+  urlTitle?: string,
+  urlPublishDate?: string,
 ): string {
-  return `请从以下内容中提炼原子笔记（子弹笔记）。
+  let prompt = `请从以下内容中提炼原子笔记（子弹笔记）。\n`;
 
-\`\`\`
-${content.slice(0, truncateLength)}
-\`\`\`
+  // 如果有标题和发布时间，提供给 AI 作为上下文
+  if (urlTitle || urlPublishDate) {
+    prompt += '\n【来源信息】\n';
+    if (urlTitle) prompt += `- 文章标题：${urlTitle}\n`;
+    if (urlPublishDate) prompt += `- 发布时间：${urlPublishDate}\n`;
+    prompt += '\n';
+  }
 
-输出要求：
+  prompt += `\`\`\`\n${content.slice(0, truncateLength)}\n\`\`\`\n\n`;
+  prompt += `输出要求：
 1. 每条笔记用 YAML frontmatter 格式（--- 开头和结尾）
 2. title 是 5~18 字的**简洁断言短语**，包含核心洞见（不是话题标签）
 3. 正文 2~5 句话，用自己的话写
@@ -96,4 +103,5 @@ ${content.slice(0, truncateLength)}
 
 ⚠️ 标题是子弹笔记的灵魂——短、准、狠。每个标题必须包含一个判断或发现。
 `;
+  return prompt;
 }

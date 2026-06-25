@@ -13,6 +13,49 @@
   padding: 8px 0;
 }
 
+/* 面板标题栏（标题 + 设置按钮） */
+.atomic-notes-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0 4px;
+}
+
+.atomic-notes-panel-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* 设置齿轮按钮 */
+.atomic-notes-setting-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.atomic-notes-setting-btn:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+.atomic-notes-setting-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* Tab 导航 */
 .atomic-notes-tabs {
   display: flex;

@@ -48,6 +48,7 @@ function friendlyError(error: unknown): string {
 
 export default class AtomicNotesPlugin extends Plugin {
   settings: PluginSettings;
+  settingTab!: AtomicNotesSettingTab;
   private _extractionService!: ExtractionService;
   private _progressModal: ProgressModal | null = null;
 
@@ -74,7 +75,8 @@ export default class AtomicNotesPlugin extends Plugin {
     this.registerView(VIEW_TYPE_ATOMIC_PANEL, (leaf) => new AtomicNotesPanel(leaf, this));
 
     // 添加设置页
-    this.addSettingTab(new AtomicNotesSettingTab(this.app, this));
+    this.settingTab = new AtomicNotesSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
 
     // 添加命令：从选中文本提炼
     this.addCommand({

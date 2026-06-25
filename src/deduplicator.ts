@@ -513,12 +513,21 @@ async function loadAndPreprocessExistingNotes(
  * - 标题为辅：标题短但信息密度高，作为辅助信号
  * - 标题缺失或 token 不足：退化为纯内容相似度
  */
+/** 语义向量预加载进度回调 */
+type SemanticProgressCallback = (
+  processed: number,
+  total: number,
+  fromCache: number,
+  fetched: number,
+) => void;
+
 export async function checkAgainstVaultDetailed(
   vault: Vault,
   notes: AtomicNote[],
   targetFolder: string,
   cacheManager: DedupCacheManager = getDefaultDedupCache(),
   semanticManager?: SemanticDedupManager,
+  onSemanticProgress?: SemanticProgressCallback,
 ): Promise<VaultMatchInfo[]> {
   // 获取或构建知识库语料
   let existingNotes: CachedNote[];
@@ -642,7 +651,10 @@ export async function checkAgainstVaultDetailed(
     }));
 
     // 预加载知识库向量（缓存，仅首次有 API 调用）
-    const vaultVectors = await semanticManager.preloadVaultVectors(preloadItems);
+    const vaultVectors = await semanticManager.preloadVaultVectors(
+      preloadItems,
+      onSemanticProgress,
+    );
 
     // 批量获取新笔记的语义最佳匹配
     const newContents = notes.map((n) => n.content);

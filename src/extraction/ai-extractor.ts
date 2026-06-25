@@ -45,6 +45,8 @@ export async function extractAtomicNotes(
   const userPrompt = buildExtractionPrompt(
     content,
     fullConfig.inputTruncateLength || INPUT_TRUNCATE_LENGTH,
+    fullConfig.urlTitle,
+    fullConfig.urlPublishDate,
   );
 
   const RETRY_DELAY_MS = 500;

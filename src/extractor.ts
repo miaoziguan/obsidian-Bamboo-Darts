@@ -102,12 +102,33 @@ async function runVaultDedupPhase(
 
   tracker.start('Phase 4b', '知识库去重', '正在与已有笔记比对...');
 
+  // 桥接：将 ProgressCallback 转为语义向量加载的数字回调
+  const semanticStartedAt = Date.now();
+  const semanticEvents: ProgressEvent[] = [];
+  const semanticProgressBridge:
+    | ((processed: number, total: number, fromCache: number, fetched: number) => void)
+    | undefined =
+    config.onProgress
+      ? (processed, total, fromCache, fetched) => {
+          const ev: ProgressEvent = {
+            phase: '语义去重',
+            name: '加载知识库向量',
+            status: 'running',
+            detail: `已加载 ${processed}/${total}（缓存 ${fromCache}，新增 ${fetched}）`,
+            subProgress: { current: processed, total },
+          };
+          semanticEvents.push(ev);
+          config.onProgress!(ev, semanticEvents, Date.now() - semanticStartedAt);
+        }
+      : undefined;
+
   const matchInfos: VaultMatchInfo[] = await checkAgainstVaultDetailed(
     config.vault,
     notes,
     config.dedupTargetFolder?.trim() || config.targetFolder || '',
     getDefaultDedupCache(),
     config.semanticManager,
+    semanticProgressBridge,
   );
 
   const HIGH_SIM_THRESHOLD = profileConfig.vaultHighThreshold;
@@ -327,6 +348,9 @@ export interface ExtractorConfig {
   inputTruncateLength?: number;
   /** 语义去重管理器实例（由 main.ts 创建并传入） */
   semanticManager?: SemanticDedupManager;
+  // URL 提取的标题和发布时间（由 readContent 填充，传给 AI prompt）
+  urlTitle?: string;
+  urlPublishDate?: string;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
@@ -371,6 +395,10 @@ interface ReadResult {
   content?: string;
   type?: ContentType;
   error?: string;
+  title?: string;
+  publishDate?: string;
+  errorCode?: string;
+  redirectUrl?: string;
 }
 
 /**
@@ -379,20 +407,26 @@ interface ReadResult {
 
 /** URL 提取结果内存缓存，同一个 URL 1 小时内复用 */
 const URL_CACHE_TTL_MS = 60 * 60 * 1000;
-const urlCache = new Map<string, { content: string; cachedAt: number }>();
+interface UrlCacheEntry {
+  content: string;
+  title: string;
+  publishDate: string;
+  cachedAt: number;
+}
+const urlCache = new Map<string, UrlCacheEntry>();
 
-function getFromUrlCache(url: string): string | null {
+function getFromUrlCache(url: string): UrlCacheEntry | null {
   const entry = urlCache.get(url);
   if (!entry) return null;
   if (Date.now() - entry.cachedAt > URL_CACHE_TTL_MS) {
     urlCache.delete(url);
     return null;
   }
-  return entry.content;
+  return entry;
 }
 
-function setUrlCache(url: string, content: string): void {
-  urlCache.set(url, { content, cachedAt: Date.now() });
+function setUrlCache(url: string, entry: UrlCacheEntry): void {
+  urlCache.set(url, entry);
 }
 
 export function clearUrlCache(): void {
@@ -407,7 +441,13 @@ async function readContent(
     // 先查缓存
     const cached = getFromUrlCache(input.content);
     if (cached) {
-      return { success: true, content: cached, type: 'url' };
+      return {
+        success: true,
+        content: cached.content,
+        type: 'url',
+        title: cached.title,
+        publishDate: cached.publishDate,
+      };
     }
 
     try {
@@ -427,13 +467,29 @@ async function readContent(
       const extractResult = await extractUrlContent(html);
 
       if (!extractResult.success) {
-        return { success: false, error: extractResult.error };
+        return {
+          success: false,
+          error: extractResult.error,
+          errorCode: extractResult.errorCode,
+          redirectUrl: extractResult.redirectUrl,
+        };
       }
 
       // 写入缓存
-      setUrlCache(input.content, extractResult.content);
+      setUrlCache(input.content, {
+        content: extractResult.content!,
+        title: extractResult.title || '',
+        publishDate: extractResult.publishDate || '',
+        cachedAt: Date.now(),
+      });
 
-      return { success: true, content: extractResult.content, type: 'url' };
+      return {
+        success: true,
+        content: extractResult.content,
+        type: 'url',
+        title: extractResult.title,
+        publishDate: extractResult.publishDate,
+      };
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       return { success: false, error: `读取 URL 失败: ${errorMsg}` };
@@ -545,6 +601,10 @@ export async function runExtraction(
   const truncatedContent =
     content.length > truncateLength ? content.slice(0, truncateLength) : content;
 
+  // 把标题和发布时间传进提炼流程
+  const urlTitle = readResult.title;
+  const urlPublishDate = readResult.publishDate;
+
   // 整体超时保护（深度模式给更长时间）
   const timeoutMs = fullConfig.enableDeepMode ? EXTRACTION_TIMEOUT_MS * 2 : EXTRACTION_TIMEOUT_MS;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -564,7 +624,7 @@ export async function runExtraction(
 
   try {
     return await Promise.race([
-      runExtractionPhases(content, truncatedContent, fullConfig, tracker, config, truncateLength),
+      runExtractionPhases(content, truncatedContent, fullConfig, tracker, config, truncateLength, urlTitle, urlPublishDate),
       timeoutPromise,
     ]);
   } finally {
@@ -582,7 +642,13 @@ async function runExtractionPhases(
   tracker: ProgressTracker,
   config: Partial<ExtractorConfig>,
   truncateLength: number,
+  urlTitle?: string,
+  urlPublishDate?: string,
 ): Promise<ExtractionResult> {
+  // 把 URL 标题和发布时间写入 config，供 AI prompt 使用
+  if (urlTitle) fullConfig.urlTitle = urlTitle;
+  if (urlPublishDate) fullConfig.urlPublishDate = urlPublishDate;
+
   // Profile 分类：自动判断或手动指定（纯规则，零 API 调用，提前到门控之前）
   let detectedProfile: ContentProfile;
   let profileSource: 'auto' | 'manual';
