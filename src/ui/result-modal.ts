@@ -791,7 +791,7 @@ export class ResultModal extends Modal {
       const headerRow = card.createEl('div', { cls: 'atomic-notes-card-header' });
 
       const checkbox = headerRow.createEl('input', {
-        attr: { type: 'checkbox' },
+        attr: { type: 'checkbox', 'data-note-index': String(i) },
       }) as HTMLInputElement;
       checkbox.checked = this.vm.selectedNotes.has(i);
       checkbox.addEventListener('change', () => {
@@ -1082,6 +1082,12 @@ export class ResultModal extends Modal {
   private updateSelectionCount() {
     if (this.countEl) {
       this.countEl.setText(`已选 ${this.vm.selectedNotes.size} / ${this.vm.result.notes.length} 条`);
+    }
+    // 同步所有 checkbox 的勾选状态
+    const checkboxes = this.notesListEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    for (const cb of checkboxes) {
+      const idx = parseInt(cb.dataset.noteIndex || '', 10);
+      cb.checked = this.vm.selectedNotes.has(idx);
     }
     this.updateToggleBtn();
   }
