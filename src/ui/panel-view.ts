@@ -177,21 +177,21 @@ export class AtomicNotesPanel extends ItemView {
   // ─── 输入面板 ───
 
   private renderInputPanel(panel: HTMLElement): void {
-    this._inputSubMode = 'text';
+    this._inputSubMode = 'url';
 
-    // 文本 / URL 子切换
+    // URL / 文本 子切换
     const subToggleBar = panel.createEl('div', {
       attr: { style: 'display:flex;gap:12px;margin-bottom:10px;padding:4px 0' },
     });
-    const textModeBtn = subToggleBar.createEl('span', {
-      text: '文本',
+    const urlModeBtn = subToggleBar.createEl('span', {
+      text: 'URL',
       attr: {
         style:
           'font-size:12px;font-weight:600;color:var(--text-accent);cursor:pointer;padding:2px 0;border-bottom:2px solid var(--text-accent)',
       },
     });
-    const urlModeBtn = subToggleBar.createEl('span', {
-      text: 'URL',
+    const textModeBtn = subToggleBar.createEl('span', {
+      text: '文本',
       attr: {
         style:
           'font-size:12px;color:var(--text-muted);cursor:pointer;padding:2px 0;border-bottom:2px solid transparent',
@@ -297,6 +297,9 @@ export class AtomicNotesPanel extends ItemView {
 
     textModeBtn.addEventListener('click', () => setInputSubMode('text'));
     urlModeBtn.addEventListener('click', () => setInputSubMode('url'));
+
+    // 默认显示 URL 模式
+    setInputSubMode('url');
 
     textarea.addEventListener('input', () => {
       charCountEl.setText(`${textarea.value.length} 字`);
