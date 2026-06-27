@@ -25,8 +25,11 @@
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  flex-shrink: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 设置齿轮按钮 */
