@@ -13,7 +13,7 @@ export interface AboutPhase {
 export const ABOUT_PHASES: AboutPhase[] = [
   ['Phase 1', '读取内容', '从文本、URL 或剪贴板获取原始内容（URL 经 100+ 选择器降噪）'],
   ['Phase 2', '质量门控', '多维规则前置过滤低质/噪声内容，累积≥3条警告升级阻断'],
-  ['Phase 3', 'AI 提炼', '调用 DeepSeek 将内容拆解为原子笔记，5xx/网络错误自动重试'],
+  ['Phase 3', 'AI 提炼', '调用配置的大模型将内容拆解为原子笔记，5xx/网络错误自动重试'],
   ['Phase 4', '同批去重', 'BM25 + 分词 + 余弦相似度，检测同批次高度相似笔记'],
   [
     'Phase 4b',
@@ -53,4 +53,10 @@ export const ABOUT_VERIFY_STATUS: [string, string][] = [
 export const ABOUT_SCORE_DIMS: [string, string][] = [
   ['洞见价值', '是否包含独立见解、反直觉判断或有价值的观点'],
   ['知识价值', '是否提供可学习的新领域知识或方法论'],
+];
+
+export const ABOUT_DISCOVERY_FEATURES: [string, string][] = [
+  ['发现索引', '自动缓存笔记特征（标题、关键词、内容哈希），发现 Tab 无需重复读文件'],
+  ['MMR 多样性重排', '推荐结果自动平衡相关度与多样性，避免推荐列表扎堆'],
+  ['参数化配置', '发现 Tab 的候选池大小、相似度门槛、推荐数量均可自定义'],
 ];
