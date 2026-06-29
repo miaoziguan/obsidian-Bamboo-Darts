@@ -38,7 +38,7 @@ ${i}`,a=await(0,Je.requestUrl)({url:e.deepseekApiUrl,method:"POST",headers:{"Con
 
 `;return o.forEach((n,s)=>{e+=`\u7B14\u8BB0${s+1}:
 `,e+=`title: ${n.title}
-`;let i=(n.content||"").slice(0,500);if(e+=`content: ${i}${n.content.length>500?"...":""}
+`;let r=(n.content||"").slice(0,500);if(e+=`content: ${r}${n.content.length>500?"...":""}
 `,e+=`tags: [${n.tags?.join(", ")||""}]
 `,n.verification&&n.verification.length>0){let r=n.tracedCount??0,a=n.needsCompareCount??0,l=n.outOfScopeCount??0;if(l>0){let c=n.verification.filter(u=>u.status==="\u8D85\u6E90").map(u=>`"${u.claim}"`).join("; ");e+=`verification: ${r} \u6761\u5DF2\u6EAF\u6E90\uFF0C${a} \u6761\u9700\u5BF9\u6BD4\uFF0C${l} \u6761\u8D85\u6E90
 `,e+=`verification_warning: \u5B58\u5728 ${l} \u6761\u8D85\u6E90\u58F0\u660E\uFF1A${c}

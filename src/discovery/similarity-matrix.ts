@@ -311,3 +311,58 @@ export function mmrRerank(
 
   return selected.map((idx) => ({ idx, sim: simToQuery[idx] }));
 }
+
+/**
+ * MMR (Maximal Marginal Relevance) 重排
+ * 平衡「与查询笔记的相关度」和「与已选笔记的多样性」，避免推荐列表里扎堆相似笔记
+ *
+ * @param simToQuery 每条笔记与查询笔记的相似度数组（长度 = notes.length）
+ * @param simMatrix   全量成对相似度矩阵
+ * @param queryIdx   查询笔记在 notes 中的索引
+ * @param topK       最终返回数量
+ * @param lambda     相关度权重（0=full diversity, 1=full relevance）
+ * @returns MMR 重排后的结果列表，每项含 idx 和原始相似度 sim
+ */
+export function mmrRerank(
+  simToQuery: number[],
+  simMatrix: number[][],
+  queryIdx: number,
+  topK: number,
+  lambda = 0.6,
+): { idx: number; sim: number }[] {
+  const n = simToQuery.length;
+  const selected: number[] = [];
+  const candidates = new Set<number>();
+
+  for (let i = 0; i < n; i++) {
+    if (i !== queryIdx) candidates.add(i);
+  }
+
+  while (selected.length < topK && candidates.size > 0) {
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+
+    for (const c of candidates) {
+      const relevance = simToQuery[c];
+      let diversityPenalty = 0;
+      if (selected.length > 0) {
+        let maxSimToSelected = 0;
+        for (const s of selected) {
+          maxSimToSelected = Math.max(maxSimToSelected, simMatrix[c][s]);
+        }
+        diversityPenalty = maxSimToSelected;
+      }
+      const score = lambda * relevance - (1 - lambda) * diversityPenalty;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = c;
+      }
+    }
+
+    if (bestIdx < 0) break;
+    selected.push(bestIdx);
+    candidates.delete(bestIdx);
+  }
+
+  return selected.map((idx) => ({ idx, sim: simToQuery[idx] }));
+}
