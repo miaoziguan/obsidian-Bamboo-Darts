@@ -1,6 +1,6 @@
 {
   "name": "obsidian-atomic-notes",
-  "version": "2.1.1",,
+  "version": "2.1.2",
   "description": "AI 提炼原子笔记，过滤信息垃圾，把阅读转化为可检索的知识节点 | Extract atomic notes from articles, links, or selected text using AI, filter noise, and turn reading into searchable knowledge nodes.",
   "main": "main.js",
   "scripts": {
