@@ -19,9 +19,14 @@ export function checkHtmlArtifacts(
   content: string,
   blockCount: number = HTML_BLOCK_COUNT,
   warnCount: number = HTML_WARN_COUNT,
+  lengthFactor: number = 1,
 ): GateResult {
   let totalHits = 0;
   const found: string[] = [];
+
+  // 长文可能包含较多 HTML 片段（如技术文档），按长度因子放宽阈值
+  const effectiveBlockCount = Math.max(blockCount, Math.floor(blockCount * lengthFactor * 0.7));
+  const effectiveWarnCount = Math.max(warnCount, Math.floor(warnCount * lengthFactor * 0.6));
 
   for (const pattern of HTML_ARTIFACT_PATTERNS) {
     const matches = content.match(pattern);
@@ -31,11 +36,11 @@ export function checkHtmlArtifacts(
     }
   }
 
-  if (totalHits >= blockCount) {
+  if (totalHits >= effectiveBlockCount) {
     return block(`检测到大量 HTML 残留标记（${found.slice(0, 3).join('、')}），内容提取可能不完整`);
   }
 
-  if (totalHits >= warnCount) {
+  if (totalHits >= effectiveWarnCount) {
     return warn(`检测到少量 HTML 残留（${found.slice(0, 3).join('、')}），提炼结果可能受影响`);
   }
 

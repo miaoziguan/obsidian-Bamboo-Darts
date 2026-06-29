@@ -40,6 +40,8 @@ export interface ProfileConfig {
   gateLinkBlockRatio: number;
   /** Phase 2: 链接密度阻断阈值（个/百字） */
   gateLinkBlockDensity: number;
+  /** Phase 2: 链接密度警告阈值（个/百字） */
+  gateLinkWarnDensity: number;
   /** Phase 2: 低质量信号命中数——硬阻断 */
   gateQualityBlockCount: number;
   /** Phase 2: 低质量信号命中数——警告 */
@@ -87,6 +89,7 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     // 技术文档可以有更多链接（参考资料）
     gateLinkBlockRatio: 0.55,
     gateLinkBlockDensity: 1.5,
+    gateLinkWarnDensity: 1.0,
     // 技术文档对广告词容忍度低
     gateQualityBlockCount: 2,
     gateQualityWarnCount: 1,
@@ -121,6 +124,7 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     gateWarnMaxLength: 20000,
     gateLinkBlockRatio: 0.4,
     gateLinkBlockDensity: 1.0,
+    gateLinkWarnDensity: 0.5,
     gateQualityBlockCount: 3,
     gateQualityWarnCount: 1,
     // 通用文章默认阈值
@@ -153,6 +157,7 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     // 观点文章链接不多
     gateLinkBlockRatio: 0.35,
     gateLinkBlockDensity: 0.8,
+    gateLinkWarnDensity: 0.4,
     // 观点文章对广告容忍度较高（自媒体常带推广）
     gateQualityBlockCount: 5,
     gateQualityWarnCount: 2,

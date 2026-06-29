@@ -12,11 +12,14 @@ export function checkLinkDump(
   content: string,
   linkBlockRatio?: number,
   linkBlockDensity?: number,
+  linkWarnDensity?: number,
+  lengthFactor: number = 1,
 ): GateResult {
   if (content.length < 100) return ok();
 
   const blockRatio = linkBlockRatio ?? 0.4;
   const blockDensity = linkBlockDensity ?? 1.0;
+  const warnDensity = Math.max(0.3, (linkWarnDensity ?? 0.5) * Math.min(1.5, 1 + (lengthFactor - 1) * 0.3));
 
   let linkCount = 0;
   let linkChars = 0;
@@ -44,7 +47,7 @@ export function checkLinkDump(
     return warn(`检测到多处导航分隔符（${navSeparators} 处），内容可能为导航栏或菜单`);
   }
 
-  if (linkDensityVal > 0.5 && linkCount >= 5) {
+  if (linkDensityVal > warnDensity && linkCount >= 5) {
     return warn(`内容包含较多链接（${linkCount} 个），可能不是文章正文`);
   }
 

@@ -834,16 +834,17 @@ export class ResultModal extends Modal {
       }
 
       // ── 预览（可展开） ──
-      const isLong = note.content.length > 200;
-      const previewText = isLong ? note.content.slice(0, 200) + '...' : note.content;
+      let isLong = note.content.length > 200;
+      let previewText = isLong ? note.content.slice(0, 200) + '...' : note.content;
       const previewEl = card.createEl('div', {
         cls: 'atomic-notes-card-preview',
         text: previewText,
       });
+      let expandHint: HTMLElement | null = null;
       if (isLong) {
         previewEl.setAttr('title', '点击展开/收起全文');
         previewEl.style.cursor = 'pointer';
-        const expandHint = card.createEl('span', {
+        expandHint = card.createEl('span', {
           text: '展开全文 ▼',
           attr: { style: 'font-size:10px;color:var(--text-faint);cursor:pointer;user-select:none' },
         });
@@ -851,7 +852,7 @@ export class ResultModal extends Modal {
         const toggleExpand = () => {
           expanded = !expanded;
           previewEl.setText(expanded ? note.content : previewText);
-          expandHint.setText(expanded ? '收起 ▲' : '展开全文 ▼');
+          if (expandHint) expandHint.setText(expanded ? '收起 ▲' : '展开全文 ▼');
         };
         previewEl.addEventListener('click', toggleExpand);
         expandHint.addEventListener('click', toggleExpand);
@@ -980,6 +981,7 @@ export class ResultModal extends Modal {
         },
       });
       const editPanel = editSection.createEl('div', {
+        cls: 'atomic-notes-edit-panel',
         attr: { style: 'display:none;margin-top:8px' },
       });
 
@@ -1016,8 +1018,16 @@ export class ResultModal extends Modal {
             },
           }) as HTMLTextAreaElement;
           const applyBtn = editPanel.createEl('button', {
-            text: '应用修改',
-            attr: { style: 'font-size:11px;padding:3px 12px;cursor:pointer' },
+            text: '✓ 应用修改',
+            cls: 'atomic-notes-apply-edit-btn',
+            attr: {
+              style:
+                'float:right;font-size:12px;padding:4px 10px;cursor:pointer;background:var(--text-error);color:#fff;border:1px solid var(--text-error);border-radius:4px;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,0.15)',
+            },
+          });
+          // 确保按钮所在容器清除浮动，避免后续元素被挤上来
+          const clearfix = editPanel.createEl('div', {
+            attr: { style: 'clear:both' },
           });
           applyBtn.addEventListener('click', () => {
             const newTitle = titleInput.value.trim() || note.title;
@@ -1029,11 +1039,34 @@ export class ResultModal extends Modal {
             // 更新标题显示
             const titleEl = card.querySelector('.atomic-notes-card-title') as HTMLElement;
             if (titleEl) titleEl.setText(`${i + 1}. ${note.title}`);
-            // 更新预览
-            const previewEl = card.querySelector('.atomic-notes-card-preview') as HTMLElement;
-            if (previewEl) {
-              const isLong = note.content.length > 200;
-              previewEl.setText(isLong ? note.content.slice(0, 200) + '...' : note.content);
+            // 更新预览（重新计算展开/收起相关状态）
+            isLong = note.content.length > 200;
+            previewText = isLong ? note.content.slice(0, 200) + '...' : note.content;
+            previewEl.setText(previewText);
+            if (isLong) {
+              previewEl.setAttr('title', '点击展开/收起全文');
+              previewEl.style.cursor = 'pointer';
+              if (!expandHint) {
+                expandHint = card.createEl('span', {
+                  text: '展开全文 ▼',
+                  attr: { style: 'font-size:10px;color:var(--text-faint);cursor:pointer;user-select:none' },
+                });
+                let expanded = false;
+                const toggleExpand = () => {
+                  expanded = !expanded;
+                  previewEl.setText(expanded ? note.content : previewText);
+                  if (expandHint) expandHint.setText(expanded ? '收起 ▲' : '展开全文 ▼');
+                };
+                previewEl.addEventListener('click', toggleExpand);
+                expandHint.addEventListener('click', toggleExpand);
+              } else {
+                expandHint.setText('展开全文 ▼');
+              }
+            } else if (expandHint) {
+              previewEl.removeAttr('title');
+              previewEl.style.cursor = '';
+              expandHint.remove();
+              expandHint = null;
             }
           });
           editPanel.style.display = 'block';
@@ -1066,6 +1099,16 @@ export class ResultModal extends Modal {
     bar
       .createEl('button', { text: '保存选中笔记', cls: 'mod-cta' })
       .addEventListener('click', async () => {
+        // 自动应用所有未提交的编辑，避免用户只编辑未点「应用修改」就保存
+        const openPanels = this.notesListEl.querySelectorAll('.atomic-notes-edit-panel');
+        for (const panel of openPanels) {
+          const panelEl = panel as HTMLElement;
+          if (panelEl.style.display !== 'none') {
+            const applyBtn = panelEl.querySelector('.atomic-notes-apply-edit-btn') as HTMLElement;
+            if (applyBtn) applyBtn.click();
+          }
+        }
+
         const selected = this.vm.getSelectedNotes();
         if (selected.length === 0) return;
         await this.onSave(selected);

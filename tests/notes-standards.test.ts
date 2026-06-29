@@ -87,6 +87,94 @@ source: https://example.com
       expect(notes[0].source).toBe('https://example.com');
       expect(notes[0].content).toBe('正文内容');
     });
+
+    it('should parse JSON object format with notes array', () => {
+      const input = JSON.stringify({
+        notes: [
+          {
+            title: 'JSON 笔记一',
+            content: '这是第一条 JSON 笔记的正文。',
+            tags: ['标签1', '标签2'],
+            source: 'https://example.com',
+          },
+          {
+            title: 'JSON 笔记二',
+            content: '这是第二条 JSON 笔记的正文。',
+          },
+        ],
+      });
+
+      const notes = parseAINoteOutput(input);
+      expect(notes.length).toBe(2);
+      expect(notes[0].title).toBe('JSON 笔记一');
+      expect(notes[0].content).toBe('这是第一条 JSON 笔记的正文。');
+      expect(notes[0].tags).toEqual(['标签1', '标签2']);
+      expect(notes[0].source).toBe('https://example.com');
+      expect(notes[1].title).toBe('JSON 笔记二');
+      expect(notes[1].tags).toBeUndefined();
+    });
+
+    it('should parse JSON array format', () => {
+      const input = JSON.stringify([
+        { title: '数组笔记一', content: '内容一', tags: ['a', 'b'] },
+        { title: '数组笔记二', content: '内容二' },
+      ]);
+
+      const notes = parseAINoteOutput(input);
+      expect(notes.length).toBe(2);
+      expect(notes[0].title).toBe('数组笔记一');
+      expect(notes[0].tags).toEqual(['a', 'b']);
+      expect(notes[1].title).toBe('数组笔记二');
+    });
+
+    it('should parse JSON with tags as comma-separated string', () => {
+      const input = JSON.stringify({
+        notes: [
+          {
+            title: '标签字符串',
+            content: '正文',
+            tags: '标签1, 标签2',
+          },
+        ],
+      });
+
+      const notes = parseAINoteOutput(input);
+      expect(notes.length).toBe(1);
+      expect(notes[0].tags).toEqual(['标签1', '标签2']);
+    });
+
+    it('should parse JSON wrapped in code block', () => {
+      const input = `\`\`\`json
+${JSON.stringify({
+        notes: [{ title: '代码块里的 JSON', content: '正文' }],
+      })}
+\`\`\``;
+
+      const notes = parseAINoteOutput(input);
+      expect(notes.length).toBe(1);
+      expect(notes[0].title).toBe('代码块里的 JSON');
+      expect(notes[0].content).toBe('正文');
+    });
+
+    it('should return empty array for empty JSON notes', () => {
+      const input = JSON.stringify({ notes: [] });
+      const notes = parseAINoteOutput(input);
+      expect(notes.length).toBe(0);
+    });
+
+    it('should ignore malformed JSON and fall back to YAML', () => {
+      const input = `not valid json
+---
+title: YAML 回退
+tags: 测试
+---
+YAML 正文`;
+
+      const notes = parseAINoteOutput(input);
+      expect(notes.length).toBe(1);
+      expect(notes[0].title).toBe('YAML 回退');
+      expect(notes[0].content).toBe('YAML 正文');
+    });
   });
 
   describe('cleanTitle', () => {

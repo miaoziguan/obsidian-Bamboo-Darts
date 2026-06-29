@@ -273,6 +273,8 @@ async function semanticCompare(
         });
       }
     }
+  } else {
+    console.warn('[核查] AI 输出 JSON 解析失败，已跳过对比，原始内容（前500字）：', rawOutput.slice(0, 500));
   }
 
   return resultMap;

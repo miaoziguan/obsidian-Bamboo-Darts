@@ -9,20 +9,30 @@ const DEFAULT_WARN_LENGTH = 200;
 const DEFAULT_MAX_LENGTH = 50000;
 const DEFAULT_WARN_MAX_LENGTH = 20000;
 
+/** 选中文本通常较短，允许更宽松的最小长度门槛 */
+const SELECTION_LENGTH_FACTOR = 0.6;
+
 export function checkLength(
   content: string,
   minLength: number = DEFAULT_MIN_LENGTH,
   warnLength: number = DEFAULT_WARN_LENGTH,
   maxLength: number = DEFAULT_MAX_LENGTH,
   warnMaxLength: number = DEFAULT_WARN_MAX_LENGTH,
+  sourceHint?: 'selection' | 'text' | 'url',
 ): GateResult {
   const len = content.length;
 
-  if (len < minLength) {
+  // 选中文本时动态放宽最小长度门槛（至少保留 20 字符下限，避免无意义片段）
+  const effectiveMinLength =
+    sourceHint === 'selection' ? Math.max(20, Math.floor(minLength * SELECTION_LENGTH_FACTOR)) : minLength;
+  const effectiveWarnLength =
+    sourceHint === 'selection' ? Math.max(40, Math.floor(warnLength * SELECTION_LENGTH_FACTOR)) : warnLength;
+
+  if (len < effectiveMinLength) {
     return block(`内容过短（${len} 字），可能信息不足`);
   }
 
-  if (len < warnLength) {
+  if (len < effectiveWarnLength) {
     return warn(`内容偏短（${len} 字），提炼结果可能有限`);
   }
 

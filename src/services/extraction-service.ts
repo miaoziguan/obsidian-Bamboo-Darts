@@ -133,8 +133,9 @@ export class ExtractionService {
       return { success: false, steps: [], error: '请先在设置中填写 DeepSeek API Key' };
     }
 
-    this._isExtracting = true;
+    // 先创建 AbortController，再设标志（防止取消调用时 controller 还是 null）
     this._abortController = new AbortController();
+    this._isExtracting = true;
 
     try {
       // 语义去重管理器
@@ -299,6 +300,7 @@ export class ExtractionService {
         apiKey: settings.hunyuanApiKey,
         apiUrl: settings.hunyuanApiUrl || undefined,
         similarityThreshold: settings.semanticSimilarityThreshold,
+        signal: this._abortController?.signal,
       },
       cachePersistence,
     );
@@ -328,6 +330,7 @@ export class ExtractionService {
       reviewApiUrl: settings.reviewApiUrl,
       reviewApiKey: settings.reviewApiKey,
       signal,
+      abortController: this._abortController ?? undefined,
       vault: this._config.vault,
       targetFolder: settings.targetFolder,
       dedupTargetFolder: settings.dedupTargetFolder,

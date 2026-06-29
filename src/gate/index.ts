@@ -6,7 +6,7 @@
  *   昂贵组（有阻断时跳过）：关键词堆砌、信息密度、噪声占比
  *
  * 所有已执行规则的结果全量收集，结构化呈现。
- * 累积 ≥3 条警告自动升级为阻断。
+ * 累积警告升级阈值根据内容长度动态调整，避免长文被过度阻断。
  */
 
 import { tokenize } from '../utils/tokenizer';
@@ -19,8 +19,6 @@ import { checkNoiseRatio } from './noise';
 import { checkHtmlArtifacts } from './html';
 import { checkMojibake } from './mojibake';
 import { checkLinkDump } from './link-dump';
-
-const WARN_BLOCK_THRESHOLD = 3;
 
 type NamedRule = { name: string; check: GateResult };
 
@@ -39,9 +37,29 @@ function buildSummary(reasons: string[]): string {
   return `${reasons[0]}（另有 ${reasons.length - 1} 个问题）`;
 }
 
-export function runGateChecks(content: string, profileConfig?: ProfileConfig): GateCheckResult {
+/**
+ * 计算内容长度相关的动态因子
+ * - lengthFactor: 基于 log10 的长度因子，用于平滑阈值调整
+ * - warnThreshold: 警告累积升级阈值，长文允许更多警告
+ */
+function computeDynamicFactors(contentLength: number): {
+  lengthFactor: number;
+  warnThreshold: number;
+} {
+  // 基础 3 条警告升级；内容越长，允许越多边缘警告
+  const lengthFactor = Math.max(1, Math.log10(contentLength + 10));
+  const warnThreshold = Math.max(3, Math.min(6, Math.floor(lengthFactor * 1.8)));
+  return { lengthFactor, warnThreshold };
+}
+
+export function runGateChecks(
+  content: string,
+  profileConfig?: ProfileConfig,
+  sourceHint?: 'selection' | 'text' | 'url',
+): GateCheckResult {
   const reasons: string[] = [];
   const warnings: string[] = [];
+  const { lengthFactor, warnThreshold } = computeDynamicFactors(content.length);
 
   // ── 廉价组：始终执行 ──
   collect(
@@ -53,6 +71,7 @@ export function runGateChecks(content: string, profileConfig?: ProfileConfig): G
         profileConfig?.gateWarnLength,
         profileConfig?.gateMaxLength,
         profileConfig?.gateWarnMaxLength,
+        sourceHint,
       ),
     },
     reasons,
@@ -65,6 +84,7 @@ export function runGateChecks(content: string, profileConfig?: ProfileConfig): G
         content,
         profileConfig?.gateQualityBlockCount,
         profileConfig?.gateQualityWarnCount,
+        lengthFactor,
       ),
     },
     reasons,
@@ -77,6 +97,7 @@ export function runGateChecks(content: string, profileConfig?: ProfileConfig): G
         content,
         profileConfig?.gateHtmlBlockCount,
         profileConfig?.gateHtmlWarnCount,
+        lengthFactor,
       ),
     },
     reasons,
@@ -89,6 +110,7 @@ export function runGateChecks(content: string, profileConfig?: ProfileConfig): G
         content,
         profileConfig?.gateMojibakeBlockCount,
         profileConfig?.gateMojibakeWarnCount,
+        lengthFactor,
       ),
     },
     reasons,
@@ -101,6 +123,8 @@ export function runGateChecks(content: string, profileConfig?: ProfileConfig): G
         content,
         profileConfig?.gateLinkBlockRatio,
         profileConfig?.gateLinkBlockDensity,
+        profileConfig?.gateLinkWarnDensity,
+        lengthFactor,
       ),
     },
     reasons,
@@ -127,6 +151,7 @@ export function runGateChecks(content: string, profileConfig?: ProfileConfig): G
           profileConfig?.gateKeywordStuffingMinLength,
           profileConfig?.gateKeywordStuffingMinCount,
           profileConfig?.gateKeywordStuffingTopN,
+          lengthFactor,
         ),
       },
       reasons,
@@ -145,7 +170,7 @@ export function runGateChecks(content: string, profileConfig?: ProfileConfig): G
   }
 
   // ── 警告累积升级 ──
-  if (reasons.length === 0 && warnings.length >= WARN_BLOCK_THRESHOLD) {
+  if (reasons.length === 0 && warnings.length >= warnThreshold) {
     reasons.push(`[综合] 累积 ${warnings.length} 条警告，质量不达标`);
   }
 

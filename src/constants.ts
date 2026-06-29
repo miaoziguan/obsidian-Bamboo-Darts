@@ -454,3 +454,17 @@ export const EMBEDDING_DIM = 1024;
 
 /** 单次 embedding API 最大 batch 大小 */
 export const EMBEDDING_BATCH_SIZE = 16;
+
+// ─── 发现 Tab 常量 ───
+
+/** 发现 Tab 默认最大参与计算笔记数 */
+export const DISCOVERY_MAX_NOTES_DEFAULT = 500;
+
+/** 发现 Tab 默认 Jaccard 相似度门槛 */
+export const DISCOVERY_JACCARD_THRESHOLD_DEFAULT = 0.3;
+
+/** 发现 Tab 默认 MMR 相关度权重 */
+export const DISCOVERY_MMR_LAMBDA_DEFAULT = 0.6;
+
+/** 发现 Tab 默认推荐数量 */
+export const DISCOVERY_TOP_K_DEFAULT = 10;

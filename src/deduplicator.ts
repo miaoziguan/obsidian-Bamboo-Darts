@@ -15,8 +15,10 @@
  * 当 token 集合 < DEDUP_MIN_TOKENS 时，不判定为重复。
  */
 
-import { Vault, TFile } from 'obsidian';
+import { Vault, TFile, DataAdapter } from 'obsidian';
 import { AtomicNote } from './utils/notes-standards';
+import { DedupFeatureCache, DedupFeatureEntry, DedupFeatureFolderData } from './dedup/feature-cache';
+import { fnv1aHash } from './utils/hash';
 import {
   DEDUP_BATCH_SIZE,
   DEDUP_CACHE_TTL,
@@ -193,6 +195,9 @@ export interface VaultMatchInfo {
 interface CachedNote {
   path: string;
   content: string;
+  contentHash: string;
+  contentLength: number;
+  contentPreview: string;
   tokens: Map<string, number>; // token → 频次
   titleTokens: Map<string, number>; // 标题 token → 频次（可选）
   vector: TfIdfVector; // 基于知识库语料的 tf-idf 向量
@@ -216,9 +221,26 @@ interface DedupCache {
  */
 class DedupCacheManager {
   private caches = new Map<string, DedupCache>(); // folder → cache
+  private featureCache = new DedupFeatureCache();
+  private savePending = false;
+
+  async initialize(adapter: DataAdapter, pluginDir: string): Promise<void> {
+    this.featureCache.initialize(adapter, pluginDir);
+    await this.featureCache.load();
+    // 将持久化缓存恢复到内存（不做文件读取验证，由 get 在首次使用时处理）
+    for (const [folder, folderData] of Object.entries(this.featureCache.getAllFolders())) {
+      try {
+        const cache = this.buildCacheFromFeatureData(folder, folderData);
+        if (cache) this.caches.set(folder, cache);
+      } catch (e) {
+        console.warn('[Bamboo Darts] 恢复去重缓存失败:', folder, e);
+      }
+    }
+  }
 
   invalidate(): void {
     this.caches.clear();
+    this.featureCache.invalidate();
   }
 
   /** 获取某文件夹的缓存，自动增量更新变动文件 */
@@ -236,7 +258,6 @@ class DedupCacheManager {
     // 当前 vault 中的文件
     const allFiles = vault.getMarkdownFiles();
     const folderFiles = allFiles.filter((f) => isPathInFolder(f.path, targetFolder));
-    const _vaultPathSet = new Set(folderFiles.map((f) => f.path));
 
     // 删除/变动的文件：移除 DF 贡献并剔除
     for (const note of cached.notes) {
@@ -282,20 +303,107 @@ class DedupCacheManager {
     return cached;
   }
 
-  /** 更新某文件夹的缓存 */
+  /** 将持久化特征数据恢复为内存缓存结构 */
+  private buildCacheFromFeatureData(folder: string, data: DedupFeatureFolderData): DedupCache | null {
+    if (data.entries.length === 0) return null;
+
+    const docTokens = data.entries.map((e) => new Map(e.tokens));
+    const idfTable = computeIdfTable(docTokens, data.entries.length || 1);
+
+    const notes: CachedNote[] = data.entries.map((e) => {
+      const tokens = new Map(e.tokens);
+      const titleTokens = new Map(e.titleTokens);
+      // 恢复时重建向量（IDF 已重新计算）
+      const vector = computeTfIdfVector(tokens, idfTable, e.contentLength, 0);
+      const titleVector =
+        titleTokens.size >= MIN_TOKENS_THRESHOLD
+          ? computeTfIdfVector(titleTokens, idfTable, 0, 0)
+          : null;
+      return {
+        path: e.path,
+        content: e.contentPreview,
+        contentHash: e.contentHash,
+        contentLength: e.contentLength,
+        contentPreview: e.contentPreview,
+        tokens,
+        titleTokens,
+        vector,
+        titleVector,
+        simhashFp: BigInt('0x' + e.simhashFp),
+        mtime: e.mtime,
+      };
+    });
+
+    return {
+      notes,
+      idfTable,
+      dfCounts: new Map(data.dfCounts),
+      targetFolder: folder,
+      timestamp: data.timestamp,
+    };
+  }
+
+  /** 更新某文件夹的缓存，并持久化 */
   set(
     targetFolder: string,
     notes: CachedNote[],
     idfTable: IdfTable,
     dfCounts: Map<string, number>,
   ): void {
-    this.caches.set(targetFolder, {
+    const cache: DedupCache = {
       notes,
       idfTable,
       dfCounts,
       targetFolder,
       timestamp: Date.now(),
-    });
+    };
+    this.caches.set(targetFolder, cache);
+    this.persist(cache);
+  }
+
+  /** 获取某文件夹的持久化特征数据（供重建时复用未变动文件） */
+  getFeatureFolderData(targetFolder: string): DedupFeatureFolderData | null {
+    return this.featureCache.getFolder(targetFolder);
+  }
+
+  /** 立即将内存缓存写入磁盘 */
+  async flush(): Promise<void> {
+    await this.featureCache.save();
+  }
+
+  private persist(cache: DedupCache): void {
+    const folderData = this.serializeCache(cache);
+    this.featureCache.setFolder(cache.targetFolder, folderData);
+    this.scheduleSave();
+  }
+
+  private serializeCache(cache: DedupCache): DedupFeatureFolderData {
+    return {
+      timestamp: cache.timestamp,
+      entries: cache.notes.map((n) => ({
+        path: n.path,
+        contentHash: n.contentHash,
+        mtime: n.mtime,
+        contentLength: n.contentLength,
+        contentPreview: n.contentPreview,
+        tokens: [...n.tokens.entries()],
+        titleTokens: [...n.titleTokens.entries()],
+        topTokens: n.vector.topTokens,
+        simhashFp: n.simhashFp.toString(16),
+      })),
+      dfCounts: [...cache.dfCounts.entries()],
+    };
+  }
+
+  private scheduleSave(): void {
+    if (this.savePending) return;
+    this.savePending = true;
+    setTimeout(() => {
+      this.savePending = false;
+      this.featureCache.save().catch((e) => {
+        console.error('[Bamboo Darts] 延迟保存去重缓存失败:', e);
+      });
+    }, 500);
   }
 }
 
@@ -446,13 +554,33 @@ export function crossCheckBatch(notes: AtomicNote[], threshold?: number): DedupR
 async function loadAndPreprocessExistingNotes(
   vault: Vault,
   targetFolder: string,
+  cacheManager: DedupCacheManager,
 ): Promise<{ notes: CachedNote[]; idfTable: IdfTable; dfCounts: Map<string, number> }> {
   const allFiles = vault.getMarkdownFiles();
   const existingFiles = allFiles.filter((file) => isPathInFolder(file.path, targetFolder));
 
-  // 分批读取
+  // 获取持久化特征缓存，用于跳过未变动文件
+  const featureFolderData = cacheManager.getFeatureFolderData(targetFolder);
+  const featureByPath = new Map<string, DedupFeatureEntry>();
+  if (featureFolderData) {
+    for (const entry of featureFolderData.entries) {
+      featureByPath.set(entry.path, entry);
+    }
+  }
+
+  // 分批读取，优先复用缓存
   const allTokens: Array<Map<string, number>> = [];
-  const rawNotes: Array<{ path: string; content: string; title: string; mtime: number }> = [];
+  const rawNotes: Array<{
+    path: string;
+    content: string;
+    contentHash: string;
+    contentLength: number;
+    contentPreview: string;
+    title: string;
+    mtime: number;
+    tokens: Map<string, number>;
+    titleTokens: Map<string, number>;
+  }> = [];
 
   for (let i = 0; i < existingFiles.length; i += DEDUP_BATCH_SIZE) {
     const batch = existingFiles.slice(i, i + DEDUP_BATCH_SIZE);
@@ -460,41 +588,71 @@ async function loadAndPreprocessExistingNotes(
     for (let j = 0; j < batch.length; j++) {
       const file = batch[j] as TFile;
       const content = contents[j];
-      // 从 YAML frontmatter 提取标题（插件保存的笔记格式首行是 ---）
-      let title = '';
-      const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
-      if (fmMatch) {
-        const titleLine = fmMatch[1].match(/^title:\s*(.+)$/m);
-        if (titleLine) title = titleLine[1].trim();
+      const normalized = content.replace(/^\uFEFF/, '').trimStart();
+      const stripped = normalized.replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').trim();
+      const contentHash = fnv1aHash(stripped);
+      const mtime = file.stat.mtime;
+
+      // 尝试复用缓存：mtime 相同且 contentHash 一致
+      const cachedFeature = featureByPath.get(file.path);
+      if (cachedFeature && cachedFeature.mtime === mtime && cachedFeature.contentHash === contentHash) {
+        const title = cachedFeature.titleTokens.length > 0
+          ? extractTitleFromContent(content, file.path)
+          : extractTitleFromContent(content, file.path);
+        const titleTokens = new Map(cachedFeature.titleTokens);
+        rawNotes.push({
+          path: file.path,
+          content,
+          contentHash,
+          contentLength: cachedFeature.contentLength,
+          contentPreview: cachedFeature.contentPreview,
+          title,
+          mtime,
+          tokens: new Map(cachedFeature.tokens),
+          titleTokens,
+        });
+        allTokens.push(new Map(cachedFeature.tokens));
+        continue;
       }
-      if (!title) {
-        const headingMatch = content.match(/^#\s+(.+)$/m);
-        title = headingMatch ? headingMatch[1].trim() : content.split('\n')[0]?.trim() || '';
-      }
-      rawNotes.push({ path: file.path, content, title, mtime: file.stat.mtime });
-      allTokens.push(tokenize(content));
+
+      // 缓存未命中或已变动：重新提取
+      const title = extractTitleFromContent(content, file.path);
+      const tokens = tokenize(content);
+      rawNotes.push({
+        path: file.path,
+        content,
+        contentHash,
+        contentLength: stripped.length,
+        contentPreview: content.slice(0, 200),
+        title,
+        mtime,
+        tokens,
+        titleTokens: tokenize(title),
+      });
+      allTokens.push(tokens);
     }
   }
 
   // 计算 IDF（基于整个目标文件夹的语料）
   const idfTable = computeIdfTable(allTokens, allTokens.length || 1);
   const avgLen =
-    rawNotes.reduce((s, rn) => s + rn.content.length, 0) / Math.max(rawNotes.length, 1);
+    rawNotes.reduce((s, rn) => s + rn.contentLength, 0) / Math.max(rawNotes.length, 1);
 
   // 计算每篇文档的 TF-IDF 向量
-  const notes: CachedNote[] = rawNotes.map((rn, idx) => {
-    const tokens = allTokens[idx];
-    const vector = computeTfIdfVector(tokens, idfTable, rn.content.length, avgLen);
-    const titleTokens = tokenize(rn.title);
+  const notes: CachedNote[] = rawNotes.map((rn) => {
+    const vector = computeTfIdfVector(rn.tokens, idfTable, rn.contentLength, avgLen);
     const titleVector =
-      titleTokens.size >= MIN_TOKENS_THRESHOLD
-        ? computeTfIdfVector(titleTokens, idfTable, rn.title.length, avgLen)
+      rn.titleTokens.size >= MIN_TOKENS_THRESHOLD
+        ? computeTfIdfVector(rn.titleTokens, idfTable, rn.title.length, avgLen)
         : null;
     return {
       path: rn.path,
       content: rn.content,
-      tokens,
-      titleTokens,
+      contentHash: rn.contentHash,
+      contentLength: rn.contentLength,
+      contentPreview: rn.contentPreview,
+      tokens: rn.tokens,
+      titleTokens: rn.titleTokens,
       vector,
       titleVector,
       simhashFp: simhash(vector.weights),
@@ -503,6 +661,27 @@ async function loadAndPreprocessExistingNotes(
   });
 
   return { notes, idfTable, dfCounts: idfTable.dfCounts };
+}
+
+/** 从正文或路径提取标题 */
+function extractTitleFromContent(content: string, path: string): string {
+  let title = '';
+  const normalized = content.replace(/^\uFEFF/, '').trimStart();
+  const fmMatch = normalized.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/);
+  if (fmMatch) {
+    const titleLine = fmMatch[1].match(/^title:\s*(.+)$/m);
+    if (titleLine) {
+      title = titleLine[1].trim().replace(/^["']|["']$/g, '');
+    }
+  }
+  if (!title) {
+    const headingMatch = content.match(/^#\s+(.+)$/m);
+    title = headingMatch ? headingMatch[1].trim() : content.split('\n').find(l => l.trim())?.trim() || '';
+  }
+  if (!title) {
+    title = path.split('/').pop()?.replace(/\.md$/, '') || path;
+  }
+  return title;
 }
 
 /**
@@ -538,14 +717,14 @@ export async function checkAgainstVaultDetailed(
     existingNotes = cached.notes;
     idfTable = cached.idfTable;
   } else {
-    const result = await loadAndPreprocessExistingNotes(vault, targetFolder);
+    const result = await loadAndPreprocessExistingNotes(vault, targetFolder, cacheManager);
     existingNotes = result.notes;
     idfTable = result.idfTable;
     cacheManager.set(targetFolder, existingNotes, idfTable, result.dfCounts);
   }
 
   // 计算整体平均文档长度（BM25 用）
-  const vaultTotalLen = existingNotes.reduce((s, n) => s + n.content.length, 0);
+  const vaultTotalLen = existingNotes.reduce((s, n) => s + (n.contentLength || n.content.length), 0);
   const newTotalLen = notes.reduce((s, n) => s + n.content.length, 0);
   const avgDocLen =
     (vaultTotalLen + newTotalLen) / Math.max(existingNotes.length + notes.length, 1);
@@ -593,8 +772,9 @@ export async function checkAgainstVaultDetailed(
       if (hammingDistance(simhashFp, existing.simhashFp) >= SIMHASH_HAMMING_THRESHOLD) continue;
 
       // 长度预过滤
+      const existingLen = existing.contentLength || existing.content.length;
       if (
-        Math.abs(length - existing.content.length) / Math.max(length, existing.content.length) >
+        Math.abs(length - existingLen) / Math.max(length, existingLen) >
         LENGTH_RATIO_THRESHOLD
       ) {
         continue;
@@ -602,7 +782,7 @@ export async function checkAgainstVaultDetailed(
 
       // 关键词预过滤
       const keywordOverlap = jaccardSimilarity(topTokens, existing.vector.topTokens);
-      if (keywordOverlap === 0 && Math.min(length, existing.content.length) > 30) continue;
+      if (keywordOverlap === 0 && Math.min(length, existingLen) > 30) continue;
 
       // 内容相似度
       const contentSim = cosineSimilarity(contentVec, existing.vector);
@@ -624,7 +804,7 @@ export async function checkAgainstVaultDetailed(
         bestMatch = {
           similarity: combinedSim,
           path: existing.path,
-          content: existing.content.slice(0, 200) + (existing.content.length > 200 ? '...' : ''),
+          content: existing.contentPreview || existing.content.slice(0, 200) + (existing.content.length > 200 ? '...' : ''),
         };
       }
     }

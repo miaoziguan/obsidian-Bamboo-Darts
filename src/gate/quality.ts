@@ -53,10 +53,20 @@ const AD_VARIANT_PATTERNS: RegExp[] = [
   /(?:100%|FREE|LIMITED).{0,10}(?:trial|offer|time)/gi,
 ];
 
-export function checkQuality(content: string, blockCount?: number, warnCount?: number): GateResult {
+export function checkQuality(
+  content: string,
+  blockCount?: number,
+  warnCount?: number,
+  lengthFactor: number = 1,
+): GateResult {
   const lower = content.toLowerCase();
-  const blockThreshold = blockCount ?? 3;
-  const warnThreshold = warnCount ?? 1;
+  const contentLen = content.length || 1;
+
+  // 动态阈值：内容越长，允许的低质信号越多（按千字缩放），但标题党信号权重更高
+  const baseBlockThreshold = blockCount ?? 3;
+  const baseWarnThreshold = warnCount ?? 1;
+  const blockThreshold = Math.max(baseBlockThreshold, Math.floor(baseBlockThreshold * lengthFactor * 0.6));
+  const warnThreshold = Math.max(baseWarnThreshold, Math.floor(baseWarnThreshold * lengthFactor * 0.5));
 
   const matchedAds = COMMERCIAL_SPAM.filter((kw) => lower.includes(kw.toLowerCase()));
   const matchedLowQ = LOW_QUALITY_SIGNALS.filter((kw) => lower.includes(kw.toLowerCase()));
@@ -72,7 +82,6 @@ export function checkQuality(content: string, blockCount?: number, warnCount?: n
   }
 
   const totalHits = matchedAds.length + matchedLowQ.length + variantHits;
-  const contentLen = content.length || 1;
   const hitRate = totalHits / (contentLen / 100);
 
   if (totalHits >= blockThreshold) {
@@ -105,9 +114,15 @@ export function checkKeywordStuffing(
   minLength: number = STUFFING_MIN_LENGTH,
   minCount: number = STUFFING_MIN_COUNT,
   topN: number = 5,
+  lengthFactor: number = 1,
 ): GateResult {
   if (content.length < minLength) return ok();
   if (tokenMap.size < 10) return ok();
+
+  // 长文中专业术语自然重复更多，按长度因子放宽 rate 阈值
+  const rateScale = Math.min(2.0, 1 + (lengthFactor - 1) * 0.5);
+  const effectiveBlockRate = blockRate * rateScale;
+  const effectiveWarnRate = warnRate * rateScale;
 
   const contentLen = content.length || 1;
   const sorted = [...tokenMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN);
@@ -116,7 +131,7 @@ export function checkKeywordStuffing(
   for (const [token, count] of sorted) {
     if (count < minCount) break;
     const rate = count / (contentLen / 100);
-    if (rate >= warnRate) {
+    if (rate >= effectiveWarnRate) {
       stuffed.push({ token, rate });
     }
   }
@@ -126,7 +141,7 @@ export function checkKeywordStuffing(
   const maxRate = stuffed[0].rate;
   const labels = stuffed.map((s) => `"${s.token}"(${s.rate.toFixed(1)}/百字)`).join('、');
 
-  if (maxRate >= blockRate) {
+  if (maxRate >= effectiveBlockRate) {
     return block(`关键词堆砌：${labels}，疑似SEO优化内容`);
   }
 

@@ -31,6 +31,17 @@ const DEFAULT_CONFIG: ExtractorConfig = {
   enableVaultDedup: true,
 };
 
+/** 最大重试次数（总尝试次数 = MAX_RETRY + 1） */
+const MAX_RETRY = 1;
+
+/** 重试延迟（毫秒） */
+const RETRY_DELAY_MS = 500;
+
+/** 休眠（毫秒） */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function extractAtomicNotes(
   content: string,
   config: Partial<ExtractorConfig> = {},
@@ -49,13 +60,11 @@ export async function extractAtomicNotes(
     fullConfig.urlPublishDate,
   );
 
-  const RETRY_DELAY_MS = 500;
-
-  for (let attempt = 0; attempt <= 1; attempt++) {
+  for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
     try {
       if (attempt > 0) {
         console.warn(`[提炼] 第 ${attempt + 1} 次尝试（重试）...`);
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+        await sleep(RETRY_DELAY_MS);
       }
 
       const response = await requestUrl({
@@ -73,6 +82,7 @@ export async function extractAtomicNotes(
           ],
           max_tokens: fullConfig.maxTokens,
           temperature: AI_TEMPERATURE,
+          response_format: { type: 'json_object' },
         }),
         signal: fullConfig.signal,
         throw: false,
@@ -85,7 +95,14 @@ export async function extractAtomicNotes(
 
       const aiContent = response.json?.choices?.[0]?.message?.content;
       if (!aiContent) {
-        return { success: false, error: 'AI 返回内容为空，请检查 API 配置或稍后重试' };
+        // 尝试从 API 响应里提取详细错误信息
+        const apiError = response.json?.error?.message || response.json?.error?.type || '';
+        const statusMsg = response.status ? `HTTP ${response.status}` : '';
+        const errorDetail = apiError ? `（${apiError}）` : '';
+        return {
+          success: false,
+          error: `AI 返回内容为空${statusMsg}${errorDetail}，请检查 API 配置或稍后重试`,
+        };
       }
 
       const notes = parseAINoteOutput(aiContent, false);
@@ -126,12 +143,18 @@ export async function extractAtomicNotes(
 
       return { success: true, notes: validNotes };
     } catch (error: unknown) {
+      // 用户取消：abortController.abort() 会让 requestUrl 抛 AbortError，直接返回不重试
+      if (error instanceof Error && error.name === 'AbortError') {
+        return { success: false, error: '用户取消了提炼' };
+      }
+
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const isRetryable = /5\d{2}|ETIMEDOUT|ECONNREFUSED|ECONNRESET|Failed to fetch|network/i.test(
+      // 429（限流）也视为可重试错误
+      const isRetryable = /5\d{2}|429|ETIMEDOUT|ECONNREFUSED|ECONNRESET|Failed to fetch|network/i.test(
         errorMsg,
       );
-      if (isRetryable && attempt === 0) {
-        console.warn(`[提炼] 可重试错误: ${errorMsg}，${RETRY_DELAY_MS}ms 后重试...`);
+      if (isRetryable && attempt < MAX_RETRY) {
+        console.warn(`[提炼] 可重试错误: ${errorMsg}，${RETRY_DELAY_MS}ms 后重试（${attempt + 1}/${MAX_RETRY}）`);
         continue;
       }
       return { success: false, error: `AI 调用失败: ${errorMsg}` };

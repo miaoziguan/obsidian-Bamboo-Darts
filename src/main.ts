@@ -5,10 +5,12 @@
  * 提炼编排逻辑已委托给 ExtractionService
  */
 
-import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, Modal } from 'obsidian';
+import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, Modal, TFile } from 'obsidian';
 import { AtomicNotesSettingTab, PluginSettings, DEFAULT_SETTINGS } from './ui/setting-tab';
 import { clearUrlCache } from './extractor';
-import { isPathInFolder, clearDedupCache } from './deduplicator';
+import { isPathInFolder, clearDedupCache, getDefaultDedupCache } from './deduplicator';
+import { DiscoveryIndex } from './discovery/index-manager';
+import { invalidateDiscoveryCache } from './discovery/similarity-matrix';
 import { stripImageNoise } from './utils/clipboard';
 import { saveNotes } from './storage';
 import { AtomicNote } from './utils/notes-standards';
@@ -49,8 +51,10 @@ function friendlyError(error: unknown): string {
 export default class AtomicNotesPlugin extends Plugin {
   settings: PluginSettings;
   settingTab!: AtomicNotesSettingTab;
+  discoveryIndex!: DiscoveryIndex;
   private _extractionService!: ExtractionService;
   private _progressModal: ProgressModal | null = null;
+  private _discoveryUpdateTimers: Map<string, number> = new Map();
 
   /** 兼容 panel-view 直接访问 plugin._isExtracting */
   get _isExtracting(): boolean {
@@ -62,9 +66,69 @@ export default class AtomicNotesPlugin extends Plugin {
 
     await this.loadSettings();
 
-    // 初始化提炼服务
+    // 初始化发现索引
     const pluginDir =
       this.manifest?.dir || `${this.app.vault.configDir}/plugins/atomic-notes-extractor`;
+    this.discoveryIndex = new DiscoveryIndex(this.app.vault.adapter, pluginDir);
+    // 后台加载，不阻塞插件启动
+    this.discoveryIndex.load().catch((e) => {
+      console.warn('[Bamboo Darts] 发现索引加载失败:', e);
+    });
+
+    // 初始化去重特征缓存
+    getDefaultDedupCache()
+      .initialize(this.app.vault.adapter, pluginDir)
+      .catch((e) => {
+        console.warn('[Bamboo Darts] 去重特征缓存初始化失败:', e);
+      });
+
+    // 监听笔记变更事件，保持发现索引同步
+    this.registerEvent(
+      this.app.vault.on('create', (file) => {
+        if (file instanceof TFile && file.extension === 'md') {
+          this._scheduleDiscoveryUpdate(file.path, 500);
+        }
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on('modify', (file) => {
+        if (file instanceof TFile && file.extension === 'md') {
+          this._scheduleDiscoveryUpdate(file.path, 1000);
+        }
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on('delete', (file) => {
+        if (file instanceof TFile && file.extension === 'md') {
+          this._cancelDiscoveryUpdate(file.path);
+          this.discoveryIndex.remove(file.path).catch((e) => {
+            console.warn('[Bamboo Darts] 移除发现索引失败:', file.path, e);
+          });
+          invalidateDiscoveryCache();
+        }
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on('rename', (file, oldPath) => {
+        if (file instanceof TFile && file.extension === 'md') {
+          this._cancelDiscoveryUpdate(oldPath);
+          this.discoveryIndex.remove(oldPath).catch((e) => {
+            console.warn('[Bamboo Darts] 重命名移除旧索引失败:', oldPath, e);
+          });
+          this.app.vault.read(file).then((content) =>
+            this.discoveryIndex.update(file.path, content, undefined, file.stat.mtime).catch((e) => {
+              console.warn('[Bamboo Darts] 重命名更新新索引失败:', file.path, e);
+            })
+          );
+          invalidateDiscoveryCache();
+        }
+      }),
+    );
+
+    // 初始化提炼服务
     this._extractionService = new ExtractionService({
       vault: this.app.vault,
       pluginDir,
@@ -161,9 +225,15 @@ export default class AtomicNotesPlugin extends Plugin {
   }
 
   async onunload() {
+    await getDefaultDedupCache().flush().catch(() => {});
     this._extractionService.dispose();
     clearDedupCache();
     clearUrlCache();
+    await this.discoveryIndex.flushSave().catch(() => {});
+    for (const timer of this._discoveryUpdateTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    this._discoveryUpdateTimers.clear();
     console.log('Bamboo Darts 插件已卸载');
   }
 
@@ -184,6 +254,14 @@ export default class AtomicNotesPlugin extends Plugin {
           this.settings.maxTokens = DEFAULT_SETTINGS.maxTokens;
         }
         this.settings.settingsVersion = 2;
+        await this.saveSettings();
+      }
+
+      if (currentVersion < 3) {
+        // v2 → v3：默认开启内容核查与笔记复查
+        this.settings.factCheck = true;
+        this.settings.enableReview = true;
+        this.settings.settingsVersion = 3;
         await this.saveSettings();
       }
     } catch (e) {
@@ -382,7 +460,16 @@ export default class AtomicNotesPlugin extends Plugin {
         await this.saveAndBacklink(input, notes);
       }).open();
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
+      // 取消有两种路径：
+      // 1. checkAborted 返回结果 → 已在上方 result.success 分支处理
+      // 2. abortController.abort() → requestUrl 抛异常，走到这里
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const isCancel =
+        (error instanceof Error && error.name === 'AbortError') ||
+        errMsg.includes('用户取消了提炼') ||
+        errMsg.toLowerCase().includes('cancel') ||
+        errMsg.toLowerCase().includes('abort');
+      if (isCancel) {
         new Notice('提炼已取消');
         return;
       }
@@ -505,7 +592,69 @@ export default class AtomicNotesPlugin extends Plugin {
         }
       }
     }
+
+    // 更新发现索引（缓存保存笔记的特征，供发现 Tab 快速计算）
+    if (savedPaths.length > 0) {
+      this.updateDiscoveryIndex(savedPaths).catch((e) => {
+        console.warn('[Bamboo Darts] 保存后更新发现索引失败:', e);
+      });
+    }
+
     await this.recordHistory(input, savedCount, savedPaths);
+  }
+
+  /**
+   * 安排延迟更新发现索引（防抖），避免每次保存都写磁盘
+   */
+  private _scheduleDiscoveryUpdate(path: string, delayMs: number): void {
+    this._cancelDiscoveryUpdate(path);
+    const timer = window.setTimeout(() => {
+      this._discoveryUpdateTimers.delete(path);
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile) || file.extension !== 'md') return;
+
+      this.app.vault
+        .read(file)
+        .then((content) =>
+          this.discoveryIndex.update(path, content, undefined, file.stat.mtime),
+        )
+        .then(() => {
+          invalidateDiscoveryCache();
+        })
+        .catch((e) => {
+          console.warn('[Bamboo Darts] 延迟更新发现索引失败:', path, e);
+        });
+    }, delayMs);
+    this._discoveryUpdateTimers.set(path, timer);
+  }
+
+  /**
+   * 取消指定路径的待更新定时器
+   */
+  private _cancelDiscoveryUpdate(path: string): void {
+    const timer = this._discoveryUpdateTimers.get(path);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      this._discoveryUpdateTimers.delete(path);
+    }
+  }
+  private async updateDiscoveryIndex(paths: string[]): Promise<void> {
+    const entries: Array<{ path: string; content: string; mtime: number }> = [];
+    for (const path of paths) {
+      try {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (file instanceof TFile) {
+          const content = await this.app.vault.read(file);
+          entries.push({ path, content, mtime: file.stat.mtime });
+        }
+      } catch (e) {
+        console.warn('[Bamboo Darts] 读取笔记更新发现索引失败:', path, e);
+      }
+    }
+    if (entries.length > 0) {
+      await this.discoveryIndex.updateBatch(entries);
+      invalidateDiscoveryCache();
+    }
   }
 
   private async recordHistory(
@@ -529,6 +678,8 @@ export default class AtomicNotesPlugin extends Plugin {
       await this.saveSettings();
     } catch (e) {
       console.warn('记录提炼历史失败:', e);
+      // 历史记录保存失败不影响主流程，但应告知用户
+      new Notice('⚠️ 提炼历史记录保存失败，已跳过（不影响笔记保存）');
     }
   }
 }

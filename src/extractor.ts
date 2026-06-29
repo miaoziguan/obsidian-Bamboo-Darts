@@ -40,6 +40,19 @@ import {
 } from './extraction/progress';
 import { fnv1aHash } from './utils/hash';
 
+/**
+ * 根据 API URL 推断服务商名称，用于状态显示。
+ * 自定义/未知地址回退到"AI"，避免写死 DeepSeek 造成误导。
+ */
+function getProviderLabel(apiUrl: string): string {
+  const lower = apiUrl.toLowerCase();
+  if (lower.includes('siliconflow')) return 'SiliconFlow';
+  if (lower.includes('deepseek')) return 'DeepSeek';
+  if (lower.includes('openai') || lower.includes('api.openai.com')) return 'OpenAI';
+  if (lower.includes('hunyuan')) return 'Hunyuan';
+  return 'AI';
+}
+
 /** 笔记内容指纹（FNV-1a 哈希，防碰撞能力远强于 length:prefix） */
 function noteFingerprint(note: AtomicNote): string {
   return `${note.content.length}:${fnv1aHash(note.content.slice(0, 200))}`;
@@ -348,6 +361,12 @@ export interface ExtractorConfig {
   inputTruncateLength?: number;
   /** 语义去重管理器实例（由 main.ts 创建并传入） */
   semanticManager?: SemanticDedupManager;
+  /**
+   * 关联的 AbortController（由调用方创建）。
+   * 用于在超时或用户取消时中止整个提炼管线。
+   * signal 字段由 abortController.signal 派生，二者同时提供。
+   */
+  abortController?: AbortController;
   // URL 提取的标题和发布时间（由 readContent 填充，传给 AI prompt）
   urlTitle?: string;
   urlPublishDate?: string;
@@ -405,8 +424,9 @@ interface ReadResult {
  * Phase 1: 读取内容（URL/文本/文件）
  */
 
-/** URL 提取结果内存缓存，同一个 URL 1 小时内复用 */
+/** URL 提取结果内存缓存，同一个 URL 1 小时内复用，最多缓存 200 条 */
 const URL_CACHE_TTL_MS = 60 * 60 * 1000;
+const URL_CACHE_MAX_SIZE = 200;
 interface UrlCacheEntry {
   content: string;
   title: string;
@@ -422,10 +442,21 @@ function getFromUrlCache(url: string): UrlCacheEntry | null {
     urlCache.delete(url);
     return null;
   }
+  // LRU：访问后移到最新位置
+  urlCache.delete(url);
+  urlCache.set(url, entry);
   return entry;
 }
 
 function setUrlCache(url: string, entry: UrlCacheEntry): void {
+  // 已存在：先删除再 set，确保移到最新位置（严格 LRU）
+  if (urlCache.has(url)) {
+    urlCache.delete(url);
+  } else if (urlCache.size >= URL_CACHE_MAX_SIZE) {
+    // 超过上限时淘汰最久未访问的条目（Map 第一个 key）
+    const firstKey = urlCache.keys().next().value;
+    urlCache.delete(firstKey);
+  }
   urlCache.set(url, entry);
 }
 
@@ -465,6 +496,51 @@ async function readContent(
       const html = response.text;
 
       const extractResult = await extractUrlContent(html);
+
+      // 如果页面需要 JS 渲染（如微信公众号），尝试用 Jina Reader 渲染
+      if (!extractResult.success && extractResult.errorCode === 'REQUIRES_JS') {
+        console.warn(`[URL] 页面需要 JS 渲染，尝试使用 Jina Reader...`);
+        try {
+          const jinaResponse = await requestUrl({
+            url: 'https://r.jina.ai/' + encodeURIComponent(input.content),
+            method: 'GET',
+            signal,
+            throw: false,
+          });
+          if (jinaResponse.text && jinaResponse.text.length > 50) {
+            const jinaText = jinaResponse.text.trim();
+            // Jina Reader 返回格式：首行是标题（"Title: xxx"），后面是正文
+            let title = extractResult.title || '';
+            let body = jinaText;
+            if (/^#\s/.test(jinaText)) {
+              // Markdown 标题格式
+              const lines = jinaText.split('\n');
+              const titleMatch = lines[0].match(/^#\s+(.+)/);
+              if (titleMatch) title = titleMatch[1].trim();
+              body = lines.slice(1).join('\n').trim();
+            } else if (/^Title:\s*/i.test(jinaText)) {
+              // Jina 格式："Title: xxx\n---\n..."
+              const parts = jinaText.split(/\n[-*]{3,}\n/);
+              if (parts.length > 1) {
+                title = parts[0].replace(/^Title:\s*/i, '').trim();
+                body = parts.slice(1).join('\n').trim();
+              }
+            }
+
+            // 写入缓存
+            setUrlCache(input.content, {
+              content: body,
+              title,
+              publishDate: extractResult.publishDate || '',
+              cachedAt: Date.now(),
+            });
+
+            return { success: true, content: body, type: 'url', title, publishDate: extractResult.publishDate };
+          }
+        } catch (jinaError) {
+          console.warn(`[URL] Jina Reader 也失败了:`, jinaError instanceof Error ? jinaError.message : String(jinaError));
+        }
+      }
 
       if (!extractResult.success) {
         return {
@@ -582,7 +658,7 @@ export async function runExtraction(
   const fullConfig: ExtractorConfig = { ...DEFAULT_CONFIG, ...config };
   const tracker: ProgressTracker = createProgressTracker(fullConfig.onProgress || null);
   const truncateLength =
-    fullConfig.inputTruncateLength && fullConfig.inputTruncateLength >= 1000
+    fullConfig.inputTruncateLength && fullConfig.inputTruncateLength > 0
       ? fullConfig.inputTruncateLength
       : INPUT_TRUNCATE_LENGTH;
 
@@ -611,8 +687,10 @@ export async function runExtraction(
 
   const timeoutPromise = new Promise<ExtractionResult>((resolve) => {
     timeoutId = setTimeout(() => {
-      if (fullConfig.signal && !fullConfig.signal.aborted) {
+      // 超时后中止整个管线（让 runExtractionPhases 在下一个检查点停止）
+      if (fullConfig.abortController && !fullConfig.abortController.signal.aborted) {
         console.warn(`[提炼] 超时（${timeoutMs / 1000}s），自动中止`);
+        fullConfig.abortController.abort();
       }
       resolve({
         success: false,
@@ -624,7 +702,7 @@ export async function runExtraction(
 
   try {
     return await Promise.race([
-      runExtractionPhases(content, truncatedContent, fullConfig, tracker, config, truncateLength, urlTitle, urlPublishDate),
+      runExtractionPhases(input.type, content, truncatedContent, fullConfig, tracker, config, truncateLength, urlTitle, urlPublishDate),
       timeoutPromise,
     ]);
   } finally {
@@ -636,6 +714,7 @@ export async function runExtraction(
  * Phase 2-6：质量门控 → AI 提炼 → 去重 → 核查 → 复查
  */
 async function runExtractionPhases(
+  inputType: 'url' | 'text' | 'selection',
   content: string,
   truncatedContent: string,
   fullConfig: ExtractorConfig,
@@ -676,7 +755,7 @@ async function runExtractionPhases(
 
   if (!fullConfig.skipGate) {
     tracker.start('Phase 2', '质量门控', '开始检查...');
-    gateResult = runGateChecks(truncatedContent, activeProfileConfig);
+    gateResult = runGateChecks(truncatedContent, activeProfileConfig, inputType);
 
     if (!gateResult.passed) {
       tracker.fail(gateResult.summary);
@@ -698,7 +777,7 @@ async function runExtractionPhases(
   } else {
     // 强制提炼：仍运行门控检查（不阻断），收集警告供 ResultModal 展示
     tracker.start('Phase 2', '质量门控', '已跳过阻断（强制提炼）');
-    gateResult = runGateChecks(truncatedContent, activeProfileConfig);
+    gateResult = runGateChecks(truncatedContent, activeProfileConfig, inputType);
     if (gateResult.warnings.length > 0) {
       tracker.complete(`跳过门控，但检测到 ${gateResult.warnings.length} 条质量提醒`);
     } else {
@@ -731,17 +810,18 @@ async function runExtractionPhases(
       '提炼原子笔记（深度模式）',
       `${profileLabel} | 文本 ${content.length} 字，分段提炼中...`,
     );
-    const chunkedNotes = await extractChunked(content, config, truncateLength, tracker);
+    const chunkedNotes = await extractChunked(content, fullConfig, truncateLength, tracker);
     if (chunkedNotes.length === 0) {
       extractResult = { success: false, error: '深度提炼未产出任何笔记' };
     } else {
       extractResult = { success: true, notes: chunkedNotes };
     }
   } else {
+    const providerLabel = getProviderLabel(fullConfig.deepseekApiUrl);
     tracker.start(
       'Phase 3',
       '提炼原子笔记',
-      `${profileLabel} | 正在调用 DeepSeek API...${truncateNote}`,
+      `${profileLabel} | 正在调用 ${providerLabel} API...${truncateNote}`,
     );
     extractResult = await extractAtomicNotes(truncatedContent, config);
   }
@@ -755,8 +835,8 @@ async function runExtractionPhases(
     };
   }
 
-  tracker.complete(`成功提炼 ${extractResult.notes!.length} 条原子笔记`);
-  let notes: AtomicNote[] = extractResult.notes!;
+  tracker.complete(`成功提炼 ${extractResult.notes?.length ?? 0} 条原子笔记`);
+  let notes: AtomicNote[] = extractResult.notes ?? [];
 
   // Phase 4: 同批交叉去重
   tracker.start('Phase 4', '同批交叉去重', '开始去重...');

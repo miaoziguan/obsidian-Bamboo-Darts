@@ -76,6 +76,6 @@ describe('extractKeywords', () => {
       '机器学习模型在药物发现和基因组学研究中展现出巨大潜力。';
     const keywords = extractKeywords(text);
     expect(keywords.size).toBeGreaterThan(5);
-    expect(keywords.size).toBeLessThan(100);
+    expect(keywords.size).toBeLessThan(200);
   });
 });

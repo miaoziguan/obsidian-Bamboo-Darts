@@ -1,7 +1,7 @@
 /**
  * 多轮分段提炼模块（深度模式）
  *
- * 将超长文本分成多段，逐段调用 AI 提炼，合并结果。
+ * 将超长文本分成多段，段间并发调用 AI 提炼，最后统一合并结果。
  * 仅在 enableDeepMode 且文本超过 INPUT_TRUNCATE_LENGTH 时触发。
  *
  * 已知权衡：段间 CHUNK_OVERLAP 重叠区可能导致相邻分段产出语义相近的笔记，
@@ -15,9 +15,6 @@ import { ProgressTracker } from './progress';
 
 /** 分段提炼的默认重叠字数 */
 const CHUNK_OVERLAP = 500;
-
-/** 段间请求间隔（ms），避免 API 限流 */
-const CHUNK_DELAY_MS = 200;
 
 /**
  * 将文本按指定大小分段，段间保留重叠
@@ -69,7 +66,10 @@ export function splitContent(text: string, chunkSize: number, overlap: number): 
 }
 
 /**
- * 多轮分段提炼
+ * 多轮分段提炼（段间并发）
+ *
+ * 所有分段独立并发调用 AI，最后统一合并结果。取消信号会同时中止所有
+ * 进行中的请求。去重与整合由调用方（Phase 4）统一处理。
  *
  * @param content 原始文本（不做截断，由调用方决定）
  * @param config  提炼配置
@@ -84,36 +84,58 @@ export async function extractChunked(
 ): Promise<AtomicNote[]> {
   const effectiveChunkSize = chunkSize && chunkSize >= 1000 ? chunkSize : INPUT_TRUNCATE_LENGTH;
   const chunks = splitContent(content, effectiveChunkSize, CHUNK_OVERLAP);
+
+  // 开始前检查取消信号
+  if (config.signal?.aborted) {
+    tracker.update({ detail: '已取消', status: 'failed' });
+    return [];
+  }
+
+  tracker.update({ detail: `深度模式：${chunks.length} 段并发提炼中...` });
+
+  const results = await Promise.all(
+    chunks.map(async (chunk, i): Promise<{ success: boolean; notes: AtomicNote[]; error?: string }> => {
+      const label = `第${i + 1}/${chunks.length}段`;
+      const result = await extractAtomicNotes(chunk, config);
+
+      const normalized: { success: boolean; notes: AtomicNote[]; error?: string } = result.success
+        ? { success: true, notes: result.notes ?? [], error: undefined }
+        : { success: false, notes: [], error: result.error || '未知错误' };
+
+      if (normalized.success && normalized.notes.length > 0) {
+        tracker.update({ detail: `${label}完成：产出 ${normalized.notes.length} 条笔记` });
+      } else if (!normalized.success) {
+        tracker.update({ detail: `${label}失败：${normalized.error}` });
+      }
+
+      return normalized;
+    }),
+  );
+
   const allNotes: AtomicNote[] = [];
   let successCount = 0;
   let failCount = 0;
+  const errors: string[] = [];
 
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    const label = `第${i + 1}/${chunks.length}轮`;
-
-    tracker.update({ detail: `${label}：处理 ${chunk.length} 字...` });
-
-    const result = await extractAtomicNotes(chunk, config);
-
-    if (result.success && result.notes) {
-      allNotes.push(...result.notes);
+  for (const r of results) {
+    if (r.success && r.notes.length > 0) {
+      allNotes.push(...r.notes);
       successCount++;
-    } else {
+    } else if (!r.success) {
       failCount++;
-      tracker.update({
-        detail: `${label}：失败 — ${result.error || '未知错误'}`,
-        status: 'failed',
-      });
-
-      // 连续失败且无任何成功产出，提前中止，避免浪费 API 调用
-      if (failCount >= 3 && successCount === 0) break;
+      if (r.error && !errors.includes(r.error)) {
+        errors.push(r.error);
+      }
     }
+  }
 
-    // 段间延迟
-    if (i < chunks.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, CHUNK_DELAY_MS));
-    }
+  if (successCount === 0) {
+    const summary = errors.length > 0 ? errors.join('；') : '所有分段均未产出笔记';
+    tracker.update({ detail: `深度提炼失败：${summary}`, status: 'failed' });
+  } else if (failCount > 0) {
+    tracker.update({
+      detail: `已完成：${successCount}/${chunks.length} 段成功，${failCount} 段失败，共产出 ${allNotes.length} 条笔记`,
+    });
   }
 
   return allNotes;

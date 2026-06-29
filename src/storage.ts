@@ -159,15 +159,20 @@ export async function saveNotes(
 
         // 检查文件是否已存在（使用预获取的集合）
         if (existingPaths.has(filePath)) {
-          // 生成递增文件名避免覆盖
+          // 生成递增文件名避免覆盖（最多尝试 100 次，防止恶意构造导致无限循环）
           const baseName = fileName;
           let counter = 1;
+          const MAX_FILENAME_ATTEMPTS = 100;
 
           do {
             const newFileName = `${baseName} ${counter}`;
             filePath = normalizePath(`${fullConfig.targetFolder}/${newFileName}.md`);
             counter++;
-          } while (existingPaths.has(filePath));
+          } while (existingPaths.has(filePath) && counter <= MAX_FILENAME_ATTEMPTS);
+
+          if (counter > MAX_FILENAME_ATTEMPTS) {
+            throw new Error(`文件名冲突：无法为「${baseName}」生成不重复的文件名（已尝试 ${MAX_FILENAME_ATTEMPTS} 次）`);
+          }
 
           // 将新路径加入集合，避免后续笔记重复
           existingPaths.add(filePath);

@@ -1,40 +1,129 @@
 /**
- * 共享 Tokenizer（中文 n-gram + 分词 + 英文完整词）
+ * 共享 Tokenizer（轻量 jieba 风格 DAG 分词 + n-gram + 英文完整词）
  *
  * 服务于去重（多粒度）和关键词提取两个场景。
  * 通过 ngramSize 参数控制中文分片粒度。
+ *
+ * 分词器内嵌一个裁剪版 jieba 词典：
+ * - 保留 jieba 原词典中频率 ≥ 5000 的高频词（覆盖常用中文词汇）
+ * - 合并 src/constants.ts 中的领域词表 CN_WORD_DICT
+ * 最终词条约 2800 条、~55KB，兼顾效果与包体积。
  */
 
-import { STOP_WORDS, CN_WORD_DICT } from '../constants';
+import { STOP_WORDS } from '../constants';
+import { JIEBA_DICT, JIEBA_DICT_TOTAL } from './jieba-dict';
 
 export interface TokenizeOptions {
   /** 中文 n-gram 大小，默认 3（去重场景）；关键词提取可设为 2 */
   ngramSize?: number;
 }
 
-/** 正向最大匹配中文分词 */
-function forwardMaxMatch(text: string): string[] {
-  const words: string[] = [];
-  let i = 0;
-  while (i < text.length) {
-    let matched = text[i]; // fallback: 单字
-    const maxLen = Math.min(5, text.length - i);
-    for (let len = maxLen; len >= 2; len--) {
-      const candidate = text.slice(i, i + len);
-      if (CN_WORD_DICT.has(candidate)) {
-        matched = candidate;
-        break;
+/** trie 节点：子节点 + 词尾频率标记 `$` */
+type TrieNode = {
+  $?: number;
+  [char: string]: TrieNode | number | undefined;
+};
+
+/** 根据词典构建前缀 trie */
+function buildTrie(dict: Array<[string, number]>): TrieNode {
+  const root: TrieNode = {};
+  for (const [word, freq] of dict) {
+    let node: TrieNode = root;
+    for (const ch of word) {
+      let next = node[ch];
+      if (!next || typeof next === 'number') {
+        next = {};
+        node[ch] = next;
+      }
+      node = next;
+    }
+    node.$ = freq;
+  }
+  return root;
+}
+
+/** 为句子构建 DAG（有向无环图），记录每个位置所有可能的词尾 */
+function buildDag(sentence: string, trie: TrieNode): number[][] {
+  const n = sentence.length;
+  const dag: number[][] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const matches: number[] = [];
+    let j = i;
+    let node: TrieNode | undefined = trie;
+    while (j < n && node && typeof node[sentence[j]] === 'object') {
+      node = node[sentence[j]] as TrieNode;
+      if (node.$ !== undefined) {
+        matches.push(j);
+      }
+      j++;
+    }
+    // 无匹配时 fallback 为单字成词
+    dag[i] = matches.length > 0 ? matches : [i];
+  }
+  return dag;
+}
+
+/**
+ * DAG 动态规划求最大概率路径。
+ * score 取 log(freq/total)，与 jieba 原算法一致。
+ */
+function calcRoute(
+  sentence: string,
+  dag: number[][],
+  freq: Map<string, number>,
+  total: number,
+): Array<[number, number]> {
+  const n = sentence.length;
+  const route: Array<[number, number]> = new Array(n + 1);
+  route[n] = [0, 0];
+
+  for (let i = n - 1; i >= 0; i--) {
+    let bestScore = -Infinity;
+    let bestJ = i;
+    for (const j of dag[i]) {
+      const word = sentence.slice(i, j + 1);
+      const f = freq.get(word) || 1;
+      const score = Math.log(f / total) + route[j + 1][0];
+      if (score > bestScore) {
+        bestScore = score;
+        bestJ = j;
       }
     }
-    words.push(matched);
-    i += matched.length;
+    route[i] = [bestScore, bestJ];
+  }
+
+  return route;
+}
+
+/** 内嵌 jieba 分词器单例 */
+const jieba = (() => {
+  const trie = buildTrie(JIEBA_DICT);
+  const freq = new Map<string, number>(JIEBA_DICT);
+  const total = JIEBA_DICT_TOTAL;
+  return { trie, freq, total };
+})();
+
+/** 使用 DAG + 最大概率路径对连续中文字符串进行分词 */
+function jiebaCut(sentence: string): string[] {
+  if (!sentence) return [];
+
+  const dag = buildDag(sentence, jieba.trie);
+  const route = calcRoute(sentence, dag, jieba.freq, jieba.total);
+
+  const words: string[] = [];
+  let i = 0;
+  const n = sentence.length;
+  while (i < n) {
+    const j = route[i][1];
+    words.push(sentence.slice(i, j + 1));
+    i = j + 1;
   }
   return words;
 }
 
 /**
  * 从文本中提取 token：
- * - 中文：字符 n-gram（ngramSize 控制，默认 3）
+ * - 中文：jieba DAG 分词（词汇级 token）+ 字符 n-gram（ngramSize 控制，默认 3）
  * - 英文：完整单词（≥2 字符）
  * 返回 token → 频次 的 Map
  */
@@ -53,8 +142,8 @@ export function tokenize(text: string, options?: TokenizeOptions): Map<string, n
 
   for (const chunk of chunks) {
     if (/[\u4e00-\u9fff]/.test(chunk)) {
-      // 中文分词（补充词汇级 token）
-      const words = forwardMaxMatch(chunk);
+      // 中文分词（jieba 风格 DAG，补充词汇级 token）
+      const words = jiebaCut(chunk);
       for (const word of words) {
         if (word.length >= 2 && !STOP_WORDS.has(word)) {
           tokens.set(`W:${word}`, (tokens.get(`W:${word}`) || 0) + 1);

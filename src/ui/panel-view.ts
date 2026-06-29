@@ -8,7 +8,8 @@
 
 import { ItemView, WorkspaceLeaf, Notice, Modal, App, TFile } from 'obsidian';
 import AtomicNotesPlugin from '../main';
-import { buildSimilarityMatrix, NoteMeta } from '../discovery/similarity-matrix';
+import { buildSimilarityMatrix, mmrRerank, NoteMeta, invalidateDiscoveryCache, SimilarityIndex } from '../discovery/similarity-matrix';
+import { DiscoveryIndex } from '../discovery/index-manager';
 import { ExtractionHistoryEntry } from '../services/history-service';
 import { stripImageNoise } from '../utils/clipboard';
 import { ProgressCallback, ProgressEvent } from '../extraction/progress';
@@ -18,6 +19,7 @@ import {
   ABOUT_GATE_RULES,
   ABOUT_VERIFY_STATUS,
   ABOUT_SCORE_DIMS,
+  ABOUT_DISCOVERY_FEATURES,
 } from './about-content';
 
 export const VIEW_TYPE_ATOMIC_PANEL = 'atomic-notes-panel';
@@ -51,9 +53,13 @@ export class AtomicNotesPanel extends ItemView {
   /** 发现面板相似度矩阵缓存 */
   private _simCache: {
     folder: string;
-    noteCount: number;
+    maxNotes: number;
+    useIndex: boolean;
+    jaccardThreshold: number;
+    mmrLambda: number;
+    topK: number;
     notes: NoteMeta[];
-    matrix: number[][];
+    index: SimilarityIndex;
   } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: AtomicNotesPlugin) {
@@ -608,7 +614,7 @@ export class AtomicNotesPanel extends ItemView {
       cls: 'atomic-notes-about-text',
     });
     el.createEl('div', {
-      text: '• 中文正向最大匹配分词（200+ 词汇词典）+ 字符 n-gram 双轨提取 token',
+      text: '• 中文 jieba 风格 DAG 分词（~2800 高频词 + 领域词）+ 字符 n-gram 双轨提取 token',
       cls: 'atomic-notes-about-bullet',
     });
     el.createEl('div', {
@@ -724,6 +730,22 @@ export class AtomicNotesPanel extends ItemView {
       text: '提炼整体设有 5 分钟超时保护（深度模式 10 分钟），超时自动中止防止 API 挂死。URL 提取结果缓存 1 小时，重复提炼跳过 HTTP 请求和解析。',
       cls: 'atomic-notes-about-text',
     });
+
+    // ── 发现功能 ──
+    el.createEl('div', { text: '发现功能', cls: 'atomic-notes-about-section' });
+    el.createEl('p', {
+      text: '发现 Tab 提供关联推荐功能，帮你从已有笔记中发现相关知识。',
+      cls: 'atomic-notes-about-text',
+    });
+    for (const [feature, desc] of ABOUT_DISCOVERY_FEATURES) {
+      const row = el.createEl('div', { cls: 'atomic-notes-about-detail-row' });
+      row.createEl('span', {
+        text: feature,
+        cls: 'detail-label',
+        attr: { style: 'min-width:56px;color:var(--text-accent)' },
+      });
+      row.createEl('span', { text: desc, cls: 'detail-desc' });
+    }
   }
 
   private setupProgressUI(wrap: HTMLElement): void {
@@ -894,6 +916,8 @@ export class AtomicNotesPanel extends ItemView {
         attr: { style: 'font-size:12px' },
       })
       .addEventListener('click', async () => {
+        this._simCache = null;
+        invalidateDiscoveryCache();
         this.renderDiscovery(container);
       });
 
@@ -904,18 +928,31 @@ export class AtomicNotesPanel extends ItemView {
   private renderRecommendation(container: HTMLElement): void {
     const app = this.app;
     const settings = this.plugin.settings;
+    const discoveryIndex = this.plugin.discoveryIndex;
 
     container.createEl('h4', { text: '关联推荐' });
 
     const noteMetas: { path: string; title: string }[] = [];
-    const allFiles = app.vault.getMarkdownFiles();
-    const files = settings.targetFolder
-      ? allFiles.filter((f: TFile) => f.path.startsWith(settings.targetFolder))
-      : allFiles;
 
-    for (const file of files) {
-      const title = file.path.split('/').pop()!.replace(/\.md$/, '');
-      noteMetas.push({ path: file.path, title });
+    // 优先使用发现索引中的标题，避免再次读取文件
+    if (discoveryIndex && discoveryIndex.loaded && settings.discoveryUseIndex !== false) {
+      const features = discoveryIndex.filterByFolder(settings.targetFolder);
+      for (const feature of features) {
+        noteMetas.push({ path: feature.path, title: feature.title });
+      }
+    }
+
+    // 索引不可用时回退到文件列表
+    if (noteMetas.length === 0) {
+      const allFiles = app.vault.getMarkdownFiles();
+      const files = settings.targetFolder
+        ? allFiles.filter((f: TFile) => f.path.startsWith(settings.targetFolder))
+        : allFiles;
+
+      for (const file of files) {
+        const title = file.path.split('/').pop()!.replace(/\.md$/, '');
+        noteMetas.push({ path: file.path, title });
+      }
     }
 
     // 搜索式选择器
@@ -1004,23 +1041,43 @@ export class AtomicNotesPanel extends ItemView {
 
       try {
         const currentFolder = settings.targetFolder || '';
-        // limit 对齐 buildSimilarityMatrix 内部的 Math.min(files.length, 500)
-        const currentCount = Math.min(files.length, 500);
+        const maxNotes = settings.discoveryMaxNotes ?? 500;
+        const jaccardThreshold = settings.discoveryJaccardThreshold ?? 0.3;
+        const mmrLambda = settings.discoveryMmrLambda ?? 0.6;
+        const topK = settings.discoveryTopK ?? 10;
+        const useIndex = settings.discoveryUseIndex !== false;
         if (
           !this._simCache ||
           this._simCache.folder !== currentFolder ||
-          this._simCache.noteCount !== currentCount
+          this._simCache.maxNotes !== maxNotes ||
+          this._simCache.useIndex !== useIndex ||
+          this._simCache.jaccardThreshold !== jaccardThreshold ||
+          this._simCache.mmrLambda !== mmrLambda ||
+          this._simCache.topK !== topK
         ) {
-          const built = await buildSimilarityMatrix(app.vault, settings.targetFolder);
+          const built = await buildSimilarityMatrix(
+            app.vault,
+            settings.targetFolder,
+            undefined,
+            this.plugin.discoveryIndex,
+            {
+              maxNotes,
+              useIndex,
+            },
+          );
           this._simCache = {
             folder: currentFolder,
-            noteCount: built.notes.length,
+            maxNotes,
+            useIndex,
+            jaccardThreshold,
+            mmrLambda,
+            topK,
             notes: built.notes,
-            matrix: built.matrix,
+            index: built.index,
           };
         }
         const notes = this._simCache.notes;
-        const matrix = this._simCache.matrix;
+        const index = this._simCache.index;
         const idx = notes.findIndex((n: NoteMeta) => n.path === selectedPath);
         if (idx < 0) {
           resultsContainer.empty();
@@ -1031,15 +1088,32 @@ export class AtomicNotesPanel extends ItemView {
           return;
         }
 
-        const ranked: { idx: number; sim: number }[] = [];
-        for (let i = 0; i < notes.length; i++) {
-          if (i !== idx) ranked.push({ idx: i, sim: matrix[idx][i] });
-        }
-        ranked.sort((a, b) => b.sim - a.sim);
-        const top10 = ranked.slice(0, 10);
+        const simToQuery: number[] = index.getSimilarityRow(idx);
+
+        const ranked = mmrRerank(simToQuery, index, idx, topK, mmrLambda);
+        const topKFiltered = ranked.filter((item) => item.sim >= jaccardThreshold);
 
         resultsContainer.empty();
-        for (const item of top10) {
+        if (ranked.length === 0) {
+          resultsContainer.createEl('div', {
+            text: '库中可比较的笔记太少，建议多保存几条笔记后再试',
+            attr: { style: 'font-size:11px;color:var(--text-muted);padding:6px 0;text-align:center' },
+          });
+          return;
+        }
+        if (topKFiltered.length === 0) {
+          const hint =
+            jaccardThreshold > 0
+              ? `没有超过相似度门槛 ${(jaccardThreshold * 100).toFixed(0)}% 的笔记，可以在设置里调低「最低相似度」`
+              : '暂时没找到跟这条笔记相关的其他笔记';
+          resultsContainer.createEl('div', {
+            text: hint,
+            attr: { style: 'font-size:11px;color:var(--text-muted);padding:6px 0;text-align:center' },
+          });
+          return;
+        }
+
+        for (const item of topKFiltered) {
           const note = notes[item.idx];
           const simPercent = (item.sim * 100).toFixed(1);
           const isHighSim = item.sim >= 0.8;

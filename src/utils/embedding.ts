@@ -54,6 +54,8 @@ export interface EmbeddingConfig {
   apiUrl?: string;
   /** 语义相似度阈值（0~1），默认 0.82 */
   similarityThreshold?: number;
+  /** 取消信号，传递给 requestUrl */
+  signal?: AbortSignal;
 }
 
 /** 缓存持久化回调 */
@@ -86,6 +88,11 @@ async function fetchBatchWithRetry(batch: string[], config: EmbeddingConfig): Pr
   const url = config.apiUrl || HUNYUAN_EMBEDDING_URL;
 
   for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+    // 每次重试前检查取消信号
+    if (config.signal?.aborted) {
+      throw new Error('用户取消了提炼');
+    }
+
     const response = await requestUrl({
       url,
       method: 'POST',
@@ -98,6 +105,7 @@ async function fetchBatchWithRetry(batch: string[], config: EmbeddingConfig): Pr
         input: batch,
       }),
       throw: false,
+      signal: config.signal,
     });
 
     if (response.status === 200) {
@@ -201,6 +209,8 @@ export class SemanticDedupManager {
   private cachePersistence: CachePersistence;
   private cache: EmbeddingCacheData | null = null;
   private cacheLoaded = false;
+  /** 正在进行的缓存加载 Promise，防止并发重复加载 */
+  private cacheLoadPromise: Promise<EmbeddingCacheData> | null = null;
 
   constructor(config: EmbeddingConfig, cachePersistence: CachePersistence) {
     this.config = config;
@@ -208,21 +218,41 @@ export class SemanticDedupManager {
   }
 
   /**
-   * 懒加载缓存
+   * 懒加载缓存（线程安全：并发调用只加载一次）
    */
   private async ensureCache(): Promise<EmbeddingCacheData> {
-    if (!this.cacheLoaded) {
-      try {
-        this.cache = await this.cachePersistence.load();
-        if (this.cache?.version !== CACHE_VERSION) {
-          this.cache = { version: CACHE_VERSION, embeddings: {} };
-        }
-      } catch {
+    // 已加载完成，直接返回
+    if (this.cacheLoaded && this.cache) {
+      return this.cache;
+    }
+    // 正在加载中，复用同一个 Promise
+    if (this.cacheLoadPromise) {
+      return await this.cacheLoadPromise;
+    }
+    // 首次加载
+    this.cacheLoadPromise = this._loadCache();
+    try {
+      return await this.cacheLoadPromise;
+    } finally {
+      // 加载完成后清除 Promise，允许后续重新加载（如缓存失效后）
+      this.cacheLoadPromise = null;
+    }
+  }
+
+  /**
+   * 实际执行缓存加载（内部方法）
+   */
+  private async _loadCache(): Promise<EmbeddingCacheData> {
+    try {
+      this.cache = await this.cachePersistence.load();
+      if (this.cache?.version !== CACHE_VERSION) {
         this.cache = { version: CACHE_VERSION, embeddings: {} };
       }
-      this.cacheLoaded = true;
+    } catch {
+      this.cache = { version: CACHE_VERSION, embeddings: {} };
     }
-    return this.cache!;
+    this.cacheLoaded = true;
+    return this.cache;
   }
 
   /**
@@ -294,30 +324,49 @@ export class SemanticDedupManager {
 
     if (toFetch.length > 0) {
       // 并行读取未命中文件的内容（相比串行，大量文件时显著更快）
-      const contents = await Promise.all(toFetch.map((entry) => entry.getContent()));
+      // 使用 allSettled：单个文件读取失败不影响其他文件
+      const readResults = await Promise.allSettled(toFetch.map((entry) => entry.getContent()));
 
-      // 批量调用 API（内建重试）
-      const vectors = await fetchEmbeddings(contents, this.config);
+      // 收集成功读取的内容和对应的 entry
+      const validEntries: (typeof toFetch)[0][] = [];
+      const validContents: string[] = [];
+      const failedIndexes: number[] = [];
 
-      let fetchedCount = 0;
       for (let i = 0; i < toFetch.length; i++) {
-        const { path, mtime } = toFetch[i];
-        const vec = vectors[i];
-        const isFailed = vec[0] === FAILED_VECTOR_MARKER;
-        if (!isFailed) {
-          const key = cacheKey(path, mtime);
-          cache.embeddings[key] = { v: vec, m: mtime };
-          result.set(path, vec);
-          fetchedCount++;
+        const result = readResults[i];
+        if (result.status === 'fulfilled') {
+          validEntries.push(toFetch[i]);
+          validContents.push(result.value);
+        } else {
+          failedIndexes.push(i);
+          console.warn(`[Embedding] 读取文件失败: ${toFetch[i].path}`, result.reason);
         }
       }
 
-      // 保存缓存
-      await this.persistCache();
+      if (validContents.length > 0) {
+        // 批量调用 API（内建重试）
+        const vectors = await fetchEmbeddings(validContents, this.config);
 
-      if (onProgress) onProgress(fromCache + fetchedCount, files.length, fromCache, fetchedCount);
-    } else {
-      if (onProgress) onProgress(fromCache, files.length, fromCache, 0);
+        let fetchedCount = 0;
+        for (let i = 0; i < validEntries.length; i++) {
+          const { path, mtime } = validEntries[i];
+          const vec = vectors[i];
+          const isFailed = vec[0] === FAILED_VECTOR_MARKER;
+          if (!isFailed) {
+            const key = cacheKey(path, mtime);
+            cache.embeddings[key] = { v: vec, m: mtime };
+            result.set(path, vec);
+            fetchedCount++;
+          }
+        }
+
+        // 保存缓存
+        await this.persistCache();
+
+        if (onProgress) onProgress(fromCache + fetchedCount, files.length, fromCache, fetchedCount);
+      } else {
+        if (onProgress) onProgress(fromCache, files.length, fromCache, 0);
+      }
     }
 
     // 清理失效缓存（已删除/重命名的文件残留）

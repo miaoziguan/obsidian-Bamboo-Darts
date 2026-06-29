@@ -4,6 +4,7 @@
  */
 
 import { MIN_NOTE_CONTENT_LENGTH } from '../constants';
+import { parseJsonArrayFromAI, parseJsonObjectFromAI } from './json-parser';
 
 export type VerificationStatus = '已溯源' | '需对比' | '超源';
 
@@ -194,7 +195,13 @@ function stripQuotes(value: string): string {
  * 从 AI 输出文本中解析出原子笔记
  *
  * 支持的格式（按优先级）：
- * 1. YAML frontmatter 格式（标准）:
+ * 1. JSON 对象格式（标准）：
+ *    {"notes": [{"title": "...", "content": "...", "tags": [...], "source": "..."}]}
+ *
+ * 2. JSON 数组格式（兼容）：
+ *    [{"title": "...", "content": "..."}, ...]
+ *
+ * 3. YAML frontmatter 格式（降级兼容）:
  *    ---
  *    title: xxx
  *    source: xxx
@@ -202,22 +209,19 @@ function stripQuotes(value: string): string {
  *    ---
  *    content
  *
- * 2. 编号列表格式（AI 常用偏离）:
+ * 4. 编号列表格式（AI 常用偏离）:
  *    1. **标题** 或 1. 标题
  *    内容...
  *
- * 3. Markdown 标题格式:
+ * 5. Markdown 标题格式:
  *    ### 标题
  *    内容...
  *
- * 4. 兜底：从内容首行提取短句作为标题
+ * 6. 兜底：从内容首行提取短句作为标题
  *
  * @param shouldEnsureTitles - 是否用代码提取标题（本地/混合模式用，纯AI模式应为 false）
  */
 export function parseAINoteOutput(text: string, shouldEnsureTitles = true): AtomicNote[] {
-  const _notes: AtomicNote[] = [];
-
-  // 预处理：清理 Markdown 代码块包裹（AI 常把结构化输出包在 ``` 中）
   const cleaned = stripCodeBlocks(text.trim());
 
   // 清理 "无符合标准的原子笔记" 等拒绝响应
@@ -225,13 +229,26 @@ export function parseAINoteOutput(text: string, shouldEnsureTitles = true): Atom
     return [];
   }
 
-  // 尝试标准 YAML frontmatter 格式解析
+  // 1. 尝试 JSON 格式解析（新默认格式）
+  const jsonNotes = tryParseJsonFormat(cleaned);
+  if (jsonNotes !== null) {
+    return shouldEnsureTitles ? ensureTitles(jsonNotes) : jsonNotes;
+  }
+
+  // 如果去掉代码块后解析失败，尝试用原始文本再试一次（可能不是代码块问题）
+  if (cleaned !== text.trim()) {
+    const rawJsonNotes = tryParseJsonFormat(text.trim());
+    if (rawJsonNotes !== null) {
+      return shouldEnsureTitles ? ensureTitles(rawJsonNotes) : rawJsonNotes;
+    }
+  }
+
+  // 2. 尝试标准 YAML frontmatter 格式解析（兼容旧格式）
   const standardNotes = tryParseFrontmatterFormat(cleaned);
   if (standardNotes.length > 0) {
     return shouldEnsureTitles ? ensureTitles(standardNotes) : standardNotes;
   }
 
-  // 如果去掉代码块后解析失败，尝试用原始文本再试一次（可能不是代码块问题）
   if (cleaned !== text.trim()) {
     const rawNotes = tryParseFrontmatterFormat(text.trim());
     if (rawNotes.length > 0) {
@@ -239,9 +256,57 @@ export function parseAINoteOutput(text: string, shouldEnsureTitles = true): Atom
     }
   }
 
-  // 尝试编号列表 / Markdown 标题格式解析
+  // 3. 尝试编号列表 / Markdown 标题格式解析
   const fallbackNotes = tryParseListFormat(cleaned);
   return shouldEnsureTitles ? ensureTitles(fallbackNotes) : fallbackNotes;
+}
+
+/** JSON 格式单条笔记的输入结构 */
+interface JsonNoteInput {
+  title?: string;
+  content?: string;
+  tags?: string | string[];
+  source?: string;
+}
+
+/**
+ * 尝试解析 JSON 格式输出
+ * 支持 { notes: [...] } 和顶层 [...] 两种结构
+ * @returns 解析出的笔记数组；若未识别到 JSON 结构则返回 null
+ */
+function tryParseJsonFormat(text: string): AtomicNote[] | null {
+  const object = parseJsonObjectFromAI<{ notes?: JsonNoteInput[] }>(text);
+  if (object && 'notes' in object && Array.isArray(object.notes)) {
+    return object.notes
+      .map(jsonNoteToAtomicNote)
+      .filter((note) => note.title || note.content);
+  }
+
+  const array = parseJsonArrayFromAI<JsonNoteInput>(text);
+  if (array) {
+    return array
+      .map(jsonNoteToAtomicNote)
+      .filter((note) => note.title || note.content);
+  }
+
+  return null;
+}
+
+/** 将 JSON 输入转换为 AtomicNote */
+function jsonNoteToAtomicNote(item: JsonNoteInput): AtomicNote {
+  const tags: string[] | undefined = Array.isArray(item.tags)
+    ? item.tags.filter((t): t is string => typeof t === 'string')
+    : item.tags
+      ? parseTags(item.tags)
+      : undefined;
+
+  return {
+    title: item.title ? stripQuotes(item.title) : '',
+    content: item.content ? stripQuotes(item.content) : '',
+    source: item.source ? stripQuotes(item.source) : undefined,
+    tags,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 /**
@@ -274,9 +339,10 @@ function stripCodeBlocks(text: string): string {
 function tryParseFrontmatterFormat(text: string): AtomicNote[] {
   const notes: AtomicNote[] = [];
 
-  // 用正则匹配完整的笔记块：可选的开头 --- + frontmatter + 关闭 --- + 正文
-  // 支持连续的多条笔记
-  const notePattern = /(?:^|\n)---\n([\s\S]*?)---\n([\s\S]*?)(?=(?:\n---\s*$)|(?:\n---\n)|$)/g;
+  // 用正则匹配完整的笔记块：开头 ---（允许前后空白）+ frontmatter + 关闭 --- + 正文
+  // 支持连续的多条笔记；对 AI 输出中常见的多余空白做容错
+  const notePattern =
+    /(?:^|\n)---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*?)(?=(?:\n---\s+$)|(?:\n---\s*\n)|$)/gm;
 
   let match: RegExpExecArray | null;
   while ((match = notePattern.exec(text)) !== null) {
