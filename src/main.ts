@@ -456,9 +456,13 @@ export default class AtomicNotesPlugin extends Plugin {
       }
 
       new Notice(`提炼完成，共 ${result.notes.length} 条原子笔记`);
-      new ResultModal(this.app, result, result.vaultDedupResult, async (notes) => {
-        await this.saveAndBacklink(input, notes);
-      }).open();
+      if (this.settings.autoSave) {
+        await this.saveAndBacklink(input, result.notes);
+      } else {
+        new ResultModal(this.app, result, result.vaultDedupResult, async (notes) => {
+          await this.saveAndBacklink(input, notes);
+        }).open();
+      }
     } catch (error) {
       // 取消有两种路径：
       // 1. checkAborted 返回结果 → 已在上方 result.success 分支处理

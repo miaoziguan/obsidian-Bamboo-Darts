@@ -211,6 +211,8 @@ export class SemanticDedupManager {
   private cacheLoaded = false;
   /** 正在进行的缓存加载 Promise，防止并发重复加载 */
   private cacheLoadPromise: Promise<EmbeddingCacheData> | null = null;
+  /** API 全局冷却时间戳：连续不可重试错误后，在此时间前跳过所有 API 调用 */
+  private _apiCooldownUntil = 0;
 
   constructor(config: EmbeddingConfig, cachePersistence: CachePersistence) {
     this.config = config;
@@ -344,6 +346,13 @@ export class SemanticDedupManager {
       }
 
       if (validContents.length > 0) {
+        // API 冷却期：上次全部失败后 5 分钟内跳过所有调用
+        if (Date.now() < this._apiCooldownUntil) {
+          console.warn('[Embedding] API 冷却中，跳过本次调用');
+          if (onProgress) onProgress(fromCache, files.length, fromCache, 0);
+          return result;
+        }
+
         // 批量调用 API（内建重试）
         const vectors = await fetchEmbeddings(validContents, this.config);
 
@@ -358,6 +367,12 @@ export class SemanticDedupManager {
             result.set(path, vec);
             fetchedCount++;
           }
+        }
+
+        // 全部失败 → 启动冷却（5 分钟）
+        if (fetchedCount === 0 && validContents.length > 0) {
+          this._apiCooldownUntil = Date.now() + 5 * 60 * 1000;
+          console.warn('[Embedding] API 调用全部失败，暂停 5 分钟');
         }
 
         // 保存缓存
@@ -389,8 +404,19 @@ export class SemanticDedupManager {
       return new Array(newNoteContents.length).fill(null);
     }
 
+    // 冷却期中 → 跳过
+    if (Date.now() < this._apiCooldownUntil) {
+      return new Array(newNoteContents.length).fill(null);
+    }
+
     // 批量获取新笔记向量（一次 API 调用，内建重试）
     const newVecs = await fetchEmbeddings(newNoteContents, this.config);
+
+    // 全部失败 → 启动冷却
+    const allFailed = newVecs.every((v) => v[0] === FAILED_VECTOR_MARKER);
+    if (allFailed && newVecs.length > 0) {
+      this._apiCooldownUntil = Date.now() + 5 * 60 * 1000;
+    }
 
     return newVecs.map((newVec) => {
       // 检查是否为失败标记向量（API 调用失败）

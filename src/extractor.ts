@@ -840,7 +840,7 @@ async function runExtractionPhases(
 
   // Phase 4: 同批交叉去重
   tracker.start('Phase 4', '同批交叉去重', '开始去重...');
-  const dedupResult = crossCheckBatch(notes, activeProfileConfig.crossBatchThreshold);
+  const dedupResult = await crossCheckBatch(notes, activeProfileConfig.crossBatchThreshold);
   tracker.complete(
     `去重后剩余 ${dedupResult.uniqueNotes.length} 条（去除 ${notes.length - dedupResult.uniqueNotes.length} 条重复）`,
   );

@@ -18,6 +18,7 @@ import {
   SEMANTIC_THRESHOLD_MIN,
   SEMANTIC_THRESHOLD_MAX,
   SEMANTIC_THRESHOLD_STEP,
+  INPUT_TRUNCATE_LENGTH,
 } from '../constants';
 import { invalidateDiscoveryCache } from '../discovery/similarity-matrix';
 
@@ -137,7 +138,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   enableDeepMode: false,
 
   // 高级参数
-  inputTruncateLength: 10000,
+  inputTruncateLength: INPUT_TRUNCATE_LENGTH,
 
   // 语义去重（Beta）
   enableSemanticDedup: false,
@@ -852,7 +853,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
       )
       .addText((text) =>
         text
-          .setValue(String(this.plugin.settings.inputTruncateLength ?? 10000))
+          .setValue(String(this.plugin.settings.inputTruncateLength ?? INPUT_TRUNCATE_LENGTH))
           .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 1000) {
