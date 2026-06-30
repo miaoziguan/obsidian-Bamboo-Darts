@@ -22,6 +22,7 @@ import { fnv1aHash } from './utils/hash';
 import {
   DEDUP_BATCH_SIZE,
   DEDUP_CACHE_TTL,
+  MAX_CACHED_FOLDERS,
   MIN_TOKENS_THRESHOLD,
   CROSS_BATCH_THRESHOLD,
   IDF_SMOOTH,
@@ -223,6 +224,8 @@ class DedupCacheManager {
   private caches = new Map<string, DedupCache>(); // folder → cache
   private featureCache = new DedupFeatureCache();
   private savePending = false;
+  /** LRU 访问顺序（最近使用的在末尾） */
+  private _accessOrder: string[] = [];
 
   async initialize(adapter: DataAdapter, pluginDir: string): Promise<void> {
     this.featureCache.initialize(adapter, pluginDir);
@@ -231,7 +234,7 @@ class DedupCacheManager {
     for (const [folder, folderData] of Object.entries(this.featureCache.getAllFolders())) {
       try {
         const cache = this.buildCacheFromFeatureData(folder, folderData);
-        if (cache) this.caches.set(folder, cache);
+        if (cache) this._cacheSet(folder, cache);
       } catch (e) {
         console.warn('[Bamboo Darts] 恢复去重缓存失败:', folder, e);
       }
@@ -240,7 +243,28 @@ class DedupCacheManager {
 
   invalidate(): void {
     this.caches.clear();
+    this._accessOrder = [];
     this.featureCache.invalidate();
+  }
+
+  /** 缓存写入（含 LRU 淘汰） */
+  private _cacheSet(folder: string, cache: DedupCache): void {
+    if (!this._accessOrder.includes(folder)) {
+      this._accessOrder.push(folder);
+      // 超出上限 → 淘汰最久未用的文件夹
+      while (this._accessOrder.length > MAX_CACHED_FOLDERS) {
+        const evicted = this._accessOrder.shift()!;
+        this.caches.delete(evicted);
+        this.featureCache.deleteFolder(evicted);
+      }
+    }
+    this.caches.set(folder, cache);
+  }
+
+  /** 缓存删除（同步清理 LRU 顺序） */
+  private _cacheDelete(folder: string): void {
+    this.caches.delete(folder);
+    this._accessOrder = this._accessOrder.filter((f) => f !== folder);
   }
 
   /** 获取某文件夹的缓存，自动增量更新变动文件 */
@@ -248,9 +272,13 @@ class DedupCacheManager {
     const cached = this.caches.get(targetFolder);
     if (!cached) return null;
     if (Date.now() - cached.timestamp > DEDUP_CACHE_TTL) {
-      this.caches.delete(targetFolder);
+      this._cacheDelete(targetFolder);
       return null;
     }
+
+    // 更新 LRU 访问顺序
+    this._accessOrder = this._accessOrder.filter((f) => f !== targetFolder);
+    this._accessOrder.push(targetFolder);
 
     // 索引缓存笔记路径
     const cacheByPath = new Map(cached.notes.map((n) => [n.path, n]));
@@ -282,13 +310,13 @@ class DedupCacheManager {
 
     // 如果变动超过一半，全量重建更划算
     if (cacheByPath.size < folderFiles.length * 0.5) {
-      this.caches.delete(targetFolder);
+      this._cacheDelete(targetFolder);
       return null;
     }
 
     // 有新增文件 → 放弃（需要异步读文件），走全量重建
     if (folderFiles.length !== cacheByPath.size) {
-      this.caches.delete(targetFolder);
+      this._cacheDelete(targetFolder);
       return null;
     }
 
@@ -357,7 +385,7 @@ class DedupCacheManager {
       targetFolder,
       timestamp: Date.now(),
     };
-    this.caches.set(targetFolder, cache);
+    this._cacheSet(targetFolder, cache);
     this.persist(cache);
   }
 
@@ -399,10 +427,18 @@ class DedupCacheManager {
     if (this.savePending) return;
     this.savePending = true;
     setTimeout(() => {
-      this.savePending = false;
-      this.featureCache.save().catch((e) => {
-        console.error('[Bamboo Darts] 延迟保存去重缓存失败:', e);
-      });
+      let succeeded = true;
+      this.featureCache
+        .save()
+        .catch((e) => {
+          console.error('[Bamboo Darts] 延迟保存去重缓存失败:', e);
+          succeeded = false;
+        })
+        .finally(() => {
+          if (succeeded) {
+            this.savePending = false;
+          }
+        });
     }, 500);
   }
 }
@@ -457,11 +493,15 @@ function editSimilarity(a: string, b: string): number {
 
 // ─── Phase 4: 同批交叉去重 ───
 
+/** 分片大小：每处理 N 条笔记 yield 一次主线程 */
+const CROSS_CHECK_CHUNK = 8;
+
 /**
  * 同批笔记交叉去重（基于 TF-IDF + 余弦相似度）
  * 新笔记之间互为语料，动态计算 IDF
+ * 改为异步分片执行：大批量笔记时周期性 yield 主线程，避免 UI 卡顿。
  */
-export function crossCheckBatch(notes: AtomicNote[], threshold?: number): DedupResult {
+export async function crossCheckBatch(notes: AtomicNote[], threshold?: number): Promise<DedupResult> {
   const effectiveThreshold = threshold ?? CROSS_BATCH_THRESHOLD;
   const uniqueNotes: AtomicNote[] = [];
   const uniqueIndices: number[] = [];
@@ -479,8 +519,11 @@ export function crossCheckBatch(notes: AtomicNote[], threshold?: number): DedupR
     computeTfIdfVector(tokens, idfTable, notes[i].content.length, avgLen),
   );
 
-  // 4. 交叉比对
+  // 4. 交叉比对（大于 CHUNK_SIZE 时分片 yield 主线程）
   for (let i = 0; i < notes.length; i++) {
+    if (i > 0 && i % CROSS_CHECK_CHUNK === 0) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
     const note = notes[i];
     const vec = vectors[i];
     const length = note.content.length;

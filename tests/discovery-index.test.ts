@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DiscoveryIndex, isFeatureStale } from '../src/discovery/index-manager';
+import { DiscoveryIndex } from '../src/discovery/index-manager';
 import type { DataAdapter } from 'obsidian';
 
 /**
@@ -134,12 +134,5 @@ describe('DiscoveryIndex', () => {
     const feature = newIndex.getFeature('notes/持久化.md');
     expect(feature!.title).toBe('持久化');
     expect(feature!.keywords.length).toBeGreaterThan(0);
-  });
-
-  it('isFeatureStale 应正确识别内容变化', async () => {
-    await index.update('notes/变化.md', '原始内容');
-    const feature = index.getFeature('notes/变化.md')!;
-    expect(isFeatureStale(feature, '原始内容')).toBe(false);
-    expect(isFeatureStale(feature, '内容已变')).toBe(true);
   });
 });

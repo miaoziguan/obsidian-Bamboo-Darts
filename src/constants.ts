@@ -41,6 +41,8 @@ export const MAX_CLAIMS_PER_CHECK = 30;
 
 /** 去重缓存 TTL（毫秒） */
 export const DEDUP_CACHE_TTL = 5 * 60 * 1000;
+/** 最多缓存的去重文件夹数（按 LRU 淘汰） */
+export const MAX_CACHED_FOLDERS = 5;
 
 /** 去重/关键词提取共用停用词表 */
 export const STOP_WORDS = new Set([
@@ -435,9 +437,6 @@ export const CN_WORD_DICT = new Set([
 
 // ─── 语义去重（混元 Embedding）常量 ───
 
-/** 是否启用语义去重（Beta） */
-export const ENABLE_SEMANTIC_DEDUP_DEFAULT = false;
-
 /** 混元 embedding API 地址 */
 export const HUNYUAN_EMBEDDING_URL = 'https://api.hunyuan.cloud.tencent.com/hyllm/v1/embeddings';
 
@@ -456,15 +455,3 @@ export const EMBEDDING_DIM = 1024;
 export const EMBEDDING_BATCH_SIZE = 16;
 
 // ─── 发现 Tab 常量 ───
-
-/** 发现 Tab 默认最大参与计算笔记数 */
-export const DISCOVERY_MAX_NOTES_DEFAULT = 500;
-
-/** 发现 Tab 默认 Jaccard 相似度门槛 */
-export const DISCOVERY_JACCARD_THRESHOLD_DEFAULT = 0.3;
-
-/** 发现 Tab 默认 MMR 相关度权重 */
-export const DISCOVERY_MMR_LAMBDA_DEFAULT = 0.6;
-
-/** 发现 Tab 默认推荐数量 */
-export const DISCOVERY_TOP_K_DEFAULT = 10;

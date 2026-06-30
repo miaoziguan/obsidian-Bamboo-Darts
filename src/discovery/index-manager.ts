@@ -11,6 +11,7 @@
  */
 
 import type { DataAdapter } from 'obsidian';
+import { Notice } from 'obsidian';
 import { extractKeywordSet } from '../utils/tokenizer';
 import { fnv1aHash } from '../utils/hash';
 
@@ -137,11 +138,19 @@ export class DiscoveryIndex {
    * 实际执行持久化（内部方法）
    */
   private async _persist(): Promise<void> {
+    this.data.updatedAt = Date.now();
     try {
-      this.data.updatedAt = Date.now();
       await this.adapter.write(this.cacheFile, JSON.stringify(this.data));
     } catch (e) {
-      console.error('[Bamboo Darts] 发现索引保存失败:', e);
+      // 重试一次（延迟 1s，可能临时磁盘繁忙）
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        await this.adapter.write(this.cacheFile, JSON.stringify(this.data));
+        console.warn('[Bamboo Darts] 发现索引保存重试成功');
+      } catch (e2) {
+        console.error('[Bamboo Darts] 发现索引保存失败（已重试）:', e2);
+        new Notice('竹叶飞刃：发现索引保存失败，请检查磁盘空间');
+      }
     }
   }
 
@@ -323,13 +332,4 @@ export class DiscoveryIndex {
     }
     return keywords;
   }
-}
-
-/**
- * 判断笔记特征是否可能过期（按内容哈希比对）
- * 返回 true 表示索引需要更新该笔记
- */
-export function isFeatureStale(feature: NoteFeature, content: string): boolean {
-  const stripped = content.replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').trim();
-  return feature.contentHash !== fnv1aHash(stripped);
 }

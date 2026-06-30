@@ -56,8 +56,6 @@ export interface ProfileConfig {
   gateKeywordStuffingMinCount: number;
   /** Phase 2: 关键词堆砌检测 Top-N（取频率最高的 N 个 token） */
   gateKeywordStuffingTopN: number;
-  /** Phase 2: 重复内容阻断阈值（相似度 0-1） */
-  gateDuplicateThreshold: number;
   /** Phase 2: HTML 残留阻断阈值（标记个数） */
   gateHtmlBlockCount: number;
   /** Phase 2: HTML 残留警告阈值（标记个数） */
@@ -99,8 +97,6 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     gateKeywordStuffingMinLength: 300,
     gateKeywordStuffingMinCount: 8,
     gateKeywordStuffingTopN: 8,
-    // 技术文档允许更高相似度（同一技术主题的不同文章可能有重叠）
-    gateDuplicateThreshold: 0.6,
     // HTML 残留、乱码阈值与通用一致
     gateHtmlBlockCount: 5,
     gateHtmlWarnCount: 2,
@@ -133,7 +129,6 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     gateKeywordStuffingMinLength: 200,
     gateKeywordStuffingMinCount: 5,
     gateKeywordStuffingTopN: 5,
-    gateDuplicateThreshold: 0.5,
     gateHtmlBlockCount: 5,
     gateHtmlWarnCount: 2,
     gateMojibakeBlockCount: 3,
@@ -167,8 +162,6 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     gateKeywordStuffingMinLength: 150,
     gateKeywordStuffingMinCount: 3,
     gateKeywordStuffingTopN: 5,
-    // 观点文章对重复更敏感
-    gateDuplicateThreshold: 0.4,
     gateHtmlBlockCount: 5,
     gateHtmlWarnCount: 2,
     gateMojibakeBlockCount: 3,
@@ -186,28 +179,33 @@ export const PROFILE_LABELS: Record<ContentProfile, string> = {
 
 // ─── 噪声隔离：分类前剥离非正文内容 ───
 
+// ─── 预编译正则（避免每次 stripNoise 重新创建） ───
+
+const RE_CODE_FENCE = /```[\s\S]*?```/g;
+const RE_INLINE_CODE = /`[^`]+`/g;
+const RE_HTML_TAG = /<[^>]+>/g;
+const RE_URL = /https?:\/\/\S+/g;
+const RE_MD_IMAGE = /!\[([^\]]*)\]\([^)]+\)/g;
+const RE_MD_LINK = /\[([^\]]*)\]\([^)]+\)/g;
+const RE_HTML_ENTITY = /&\w+;/g;
+const RE_WECHAT_META = /(?:阅读|阅读数|点赞|在看|转发|收藏)\s*\d+/g;
+const RE_WECHAT_AUDIO = /🎧\s*\d+人/g;
+
 /**
  * 剥离 HTML 标签、URL、代码围栏、图片/链接 markdown 等非正文内容，
  * 确保 classifyContent 的密度信号只来自真正的正文数据点。
  */
 function stripNoise(text: string): string {
   let s = text;
-  // 剥离代码围栏（保留围栏数量供 countCodeBlocks 使用，这里只影响密度计算）
-  s = s.replace(/```[\s\S]*?```/g, ' ');
-  // 剥离行内代码
-  s = s.replace(/`[^`]+`/g, ' ');
-  // 剥离 HTML 标签
-  s = s.replace(/<[^>]+>/g, ' ');
-  // 剥离 URL（http/https 链接）
-  s = s.replace(/https?:\/\/\S+/g, ' ');
-  // 剥离 markdown 图片和链接：![alt](url)、[text](url)
-  s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1 ');
-  s = s.replace(/\[([^\]]*)\]\([^)]+\)/g, '$1 ');
-  // 剥离 HTML 实体
-  s = s.replace(/&\w+;/g, ' ');
-  // 剥离微信常见元数据标记："阅读 1234"、"赞 56"、"🎧 X人"
-  s = s.replace(/(?:阅读|阅读数|点赞|在看|转发|收藏)\s*\d+/g, ' ');
-  s = s.replace(/🎧\s*\d+人/g, ' ');
+  s = s.replace(RE_CODE_FENCE, ' ');
+  s = s.replace(RE_INLINE_CODE, ' ');
+  s = s.replace(RE_HTML_TAG, ' ');
+  s = s.replace(RE_URL, ' ');
+  s = s.replace(RE_MD_IMAGE, '$1 ');
+  s = s.replace(RE_MD_LINK, '$1 ');
+  s = s.replace(RE_HTML_ENTITY, ' ');
+  s = s.replace(RE_WECHAT_META, ' ');
+  s = s.replace(RE_WECHAT_AUDIO, ' ');
   return s;
 }
 
