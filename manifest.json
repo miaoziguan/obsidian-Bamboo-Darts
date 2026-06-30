@@ -1,7 +1,7 @@
 {
 	"id": "atomic-notes-extractor",
 	"name": "Bamboo Darts",
-	"version": "2.1.4",
+	"version": "2.1.5",
 	"minAppVersion": "1.0.0",
 	"description": "AI 提炼原子笔记，过滤信息垃圾，把阅读转化为可检索的知识节点 | Extract atomic notes from articles, links, or selected text using AI, filter noise, and turn reading into searchable knowledge nodes.",
 	"author": "羽鳞君",
