@@ -10,7 +10,7 @@
 
 // ─── 错误码 ───
 
-export const UrlExtractError = {
+const UrlExtractError = {
   /** HTML 为空或无法解析 */
   EMPTY_HTML: 'EMPTY_HTML',
   /** 提取内容过短（可能不是文章页） */
@@ -21,7 +21,7 @@ export const UrlExtractError = {
   META_REFRESH: 'META_REFRESH',
 } as const;
 
-export type UrlExtractErrorCode = (typeof UrlExtractError)[keyof typeof UrlExtractError];
+type UrlExtractErrorCode = (typeof UrlExtractError)[keyof typeof UrlExtractError];
 
 // ─── 提取选项 ───
 
@@ -35,7 +35,7 @@ const DEFAULT_OPTIONS: ExtractOptions = {
 
 // ─── 返回值 ───
 
-export interface UrlExtractResult {
+interface UrlExtractResult {
   success: boolean;
   content?: string;
   title?: string;
@@ -228,7 +228,7 @@ function isNoiseElement(el: Element): boolean {
  * 检测 HTML 中是否有 meta refresh 跳转，有则返回目标 URL
  * 用 DOMParser 解析（比正则更健壮，能处理各种引号格式）
  */
-export function detectMetaRefresh(html: string): string | null {
+function detectMetaRefresh(html: string): string | null {
   try {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const meta = doc.querySelector('meta[http-equiv="refresh" i]');

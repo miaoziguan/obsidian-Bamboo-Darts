@@ -122,7 +122,7 @@ export function extractVerifiableClaims(content: string): VerifiableClaim[] {
 
 // ─── 原文溯源（Layer 1 核心） ───
 
-export interface SourceMatch {
+interface SourceMatch {
   status: '已溯源' | '需对比';
   /** 原文中匹配到的上下文句子 */
   sourceText: string;

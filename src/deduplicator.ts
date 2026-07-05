@@ -40,7 +40,6 @@ import { jaccardSimilarity } from './utils/jaccard';
 // ─── Token 化 ───
 
 import { tokenize } from './utils/tokenizer';
-// 重导出供测试使用
 export { tokenize };
 
 // ─── TF-IDF / 向量（抽至 dedup/idf.ts） ───

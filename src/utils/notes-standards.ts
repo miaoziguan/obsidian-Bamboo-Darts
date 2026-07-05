@@ -37,7 +37,7 @@ export interface AtomicNote {
 
 /** 自增计数器，为 AtomicNote 生成简易唯一 ID */
 let _noteIdCounter = 0;
-export function genNoteId(): string {
+function genNoteId(): string {
   return `n_${Date.now().toString(36)}_${(_noteIdCounter++).toString(36)}`;
 }
 

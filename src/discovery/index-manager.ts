@@ -22,7 +22,7 @@ const INDEX_VERSION = 1;
 const INDEX_FILE_NAME = 'discovery-index.json';
 
 /** 单篇笔记的缓存特征 */
-export interface NoteFeature {
+interface NoteFeature {
   /** 笔记路径 */
   path: string;
   /** 笔记标题（从文件名或 frontmatter 提取） */
@@ -36,14 +36,14 @@ export interface NoteFeature {
 }
 
 /** 发现索引数据 */
-export interface DiscoveryIndexData {
+interface DiscoveryIndexData {
   version: number;
   updatedAt: number;
   notes: Record<string, NoteFeature>;
 }
 
 /** 索引初始化选项 */
-export interface DiscoveryIndexOptions {
+interface DiscoveryIndexOptions {
   /** 关键词提取后保留的最大数量，0 表示保留全部 */
   maxKeywords?: number;
 }

@@ -85,7 +85,7 @@ export interface ExtractOptions {
 }
 
 /** rebuildVectorIndex() 的返回结果 */
-export interface RebuildResult {
+interface RebuildResult {
   total: number;
   fromCache: number;
   fetched: number;

@@ -20,7 +20,7 @@ function normalizeWS(s: string): string {
 
 // ─── 结果类型 ───
 
-export interface VerificationResult {
+interface VerificationResult {
   notes: AtomicNote[];
   traced: number;
   needsCompare: number;

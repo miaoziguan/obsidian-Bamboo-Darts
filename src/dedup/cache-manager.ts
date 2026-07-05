@@ -32,7 +32,7 @@ export interface CachedNote {
 }
 
 /** 按文件夹隔离的去重缓存 */
-export interface DedupCache {
+interface DedupCache {
   notes: CachedNote[];
   idfTable: IdfTable;
   /** token → 原始文档频率（用于增量 IDF 更新） */

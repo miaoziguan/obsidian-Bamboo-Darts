@@ -37,7 +37,7 @@ export interface DedupFeatureFolderData {
   dfCounts: Array<[string, number]>;
 }
 
-export interface DedupFeatureCacheData {
+interface DedupFeatureCacheData {
   version: number;
   updatedAt: number;
   folders: Record<string, DedupFeatureFolderData>;
