@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as obsidian from 'obsidian';
 import { runExtraction } from '../src/extractor';
 import type { ExtractorConfig, ExtractionDeps } from '../src/extractor';
 import type { AtomicNote } from '../src/utils/notes-standards';
@@ -262,5 +263,37 @@ describe('extractor DI 脚手架', () => {
     expect(result.notes![0].id).toBe('a');
     expect(result.verificationSummary).toBeDefined();
     expect(result.verificationSummary!.outOfScope).toBe(1);
+  });
+
+  // ── Task 4：Phase 1 URL Jina 渲染回退分支 ──
+
+  it('URL 主提取 REQUIRES_JS → Jina Reader 成功回退返回正文', async () => {
+    const requestUrlSpy = vi.spyOn(obsidian, 'requestUrl');
+
+    // 第一次：主 URL 返回极短 HTML → 触发 REQUIRES_JS
+    requestUrlSpy.mockResolvedValueOnce({
+      status: 200,
+      text: '<html><body><div></div></body></html>',
+      json: {} as never,
+    } as never);
+
+    // 第二次：Jina Reader 返回正文（长度需 >50 以进入回退分支）
+    const jinaBody = '# 测试标题\n\n这是通过 Jina Reader 渲染出来的正文内容，足够长以确保超过五十个字符的门槛从而成功进入回退渲染分支并通过后续门控检查流程。';
+    requestUrlSpy.mockResolvedValueOnce({
+      status: 200,
+      text: jinaBody,
+      json: {} as never,
+    } as never);
+
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [] }));
+    const result = await runExtraction(
+      { type: 'url', content: 'https://example.com/js-rendered-page' },
+      makeConfig({ extractAtomicNotes: extractSpy }, { skipGate: true, maxTokens: 100 }),
+    );
+
+    expect(requestUrlSpy).toHaveBeenCalledTimes(2);
+    // 主 URL + Jina 各一次；管线应走到 Phase 3（证明 URL 读取成功）
+    expect(extractSpy).toHaveBeenCalledTimes(1);
+    requestUrlSpy.mockRestore();
   });
 });
