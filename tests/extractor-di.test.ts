@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runExtraction } from '../src/extractor';
 import type { ExtractorConfig, ExtractionDeps } from '../src/extractor';
 import type { AtomicNote } from '../src/utils/notes-standards';
+import type { VaultMatchInfo, DuplicateInfo } from '../src/deduplicator';
+import type { ReviewResult } from '../src/review/note-reviewer';
 
 /** 创建最小可用 config（含注入依赖） */
 function makeConfig(deps: Partial<ExtractionDeps>, overrides: Partial<ExtractorConfig> = {}): Partial<ExtractorConfig> {
@@ -141,5 +143,124 @@ describe('extractor DI 脚手架', () => {
     expect(result.success).toBe(true);
     expect(result.notes!.length).toBe(1);
     expect(result.notes![0].id).toBe('a');
+  });
+
+  // ── Task 1：收尾逻辑（duplicateHints 派生 + vaultDedupResult.uniqueNotes 更新）──
+
+  it('启用 vault dedup → duplicateHints 派生且 vaultDedupResult.uniqueNotes 同步最终 notes', async () => {
+    const noteA = makeNote('a', '笔记A', '笔记A的内容');
+    const noteB = makeNote('b', '笔记B', '笔记B的内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA, noteB] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    // 知识库去重：noteA 无匹配（bestMatch:null 保留），noteB 中相似度匹配 → 进入 pending
+    const matchInfoA: VaultMatchInfo = {
+      note: noteA,
+      noteIndex: 0,
+      bestMatch: null,
+    };
+    const matchInfoB: VaultMatchInfo = {
+      note: noteB,
+      noteIndex: 1,
+      bestMatch: { similarity: 0.7, path: 'existing/b.md', content: '已有笔记内容' },
+    };
+    const vaultSpy = vi.fn(async () => [matchInfoA, matchInfoB]);
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      checkAgainstVaultDetailed: vaultSpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证收尾阶段 duplicateHints 与 vaultDedupResult 的同步逻辑正确' },
+      makeConfig(deps, { enableVaultDedup: true, autoClassify: false, profile: 'balanced', vault: new (await import('obsidian')).Vault() }),
+    );
+
+    expect(result.success).toBe(true);
+    // pending 派生：noteB 被标记且保留（无后续过滤）
+    expect(result.vaultDedupPending).toBeDefined();
+    expect(result.vaultDedupPending!.length).toBe(1);
+    expect(result.vaultDedupPending![0].noteId).toBe('b');
+    // duplicateHints 由 pending 派生
+    expect(result.duplicateHints).toBeDefined();
+    expect(result.duplicateHints!.length).toBe(1);
+    expect(result.duplicateHints![0].matchedNote).toBe('existing/b.md');
+    // vaultDedupResult.uniqueNotes 已同步为最终 notes（两条）
+    expect(result.vaultDedupResult).toBeDefined();
+    expect(result.vaultDedupResult!.uniqueNotes.length).toBe(2);
+    expect(result.vaultDedupResult!.uniqueNotes.map((n) => n.id).sort()).toEqual(['a', 'b']);
+  });
+
+  // ── Task 2：Phase 4b 高/中相似度 pending 分类 ──
+
+  it('注入高/中两条 matchInfo → pending 含 highSimilarity 标记且统计文案正确', async () => {
+    const noteA = makeNote('a', '高相似', '高相似度笔记内容');
+    const noteB = makeNote('b', '中相似', '中相似度笔记内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA, noteB] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    const highMatch: VaultMatchInfo = {
+      note: noteA,
+      noteIndex: 0,
+      bestMatch: { similarity: 0.85, path: 'existing/a.md', content: '高' },
+    };
+    const midMatch: VaultMatchInfo = {
+      note: noteB,
+      noteIndex: 1,
+      bestMatch: { similarity: 0.6, path: 'existing/b.md', content: '中' },
+    };
+    const vaultSpy = vi.fn(async () => [highMatch, midMatch]);
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      checkAgainstVaultDetailed: vaultSpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证知识库去重阶段能正确区分高相似度与中相似度并生成对应的待确认项' },
+      makeConfig(deps, { enableVaultDedup: true, autoClassify: false, profile: 'balanced', vault: new (await import('obsidian')).Vault() }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.vaultDedupPending).toBeDefined();
+    expect(result.vaultDedupPending!.length).toBe(2);
+    const high = result.vaultDedupPending!.find((p) => p.noteId === 'a');
+    const mid = result.vaultDedupPending!.find((p) => p.noteId === 'b');
+    expect(high!.highSimilarity).toBe(true);
+    expect(mid!.highSimilarity).toBeUndefined();
+    // tracker 统计文案含高/中相似度计数
+    const summary = result.steps.map((s) => s.message).join(' ');
+    expect(summary).toContain('高相似度待确认');
+    expect(summary).toContain('中相似度待确认');
+  });
+
+  // ── Task 3：Phase 5 verifiedOnly 超源过滤 ──
+
+  it('注入 verifyClaims 返回超源 → verifiedOnly 过滤掉超源笔记且触发 remap', async () => {
+    const noteA = makeNote('a', '正常', '正常笔记内容');
+    const noteB = makeNote('b', '超源', '超源笔记内容');
+    // 给 noteB 打上 verification 超源标记（runFactCheckPhase 依此过滤）
+    noteB.verification = [{ status: '超源', claim: '某声明', evidence: '原文', sourceQuote: '' }] as unknown as AtomicNote['verification'];
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA, noteB] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    const verifySpy = vi.fn(async () => ({ traced: 1, needsCompare: 0, outOfScope: 1 }));
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      verifyClaims: verifySpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证内容核查阶段在 verifiedOnly 模式下能正确过滤掉被标记为超源的笔记' },
+      makeConfig(deps, { factCheck: true, verifiedOnly: true }),
+    );
+
+    expect(verifySpy).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    expect(result.notes!.length).toBe(1);
+    expect(result.notes![0].id).toBe('a');
+    expect(result.verificationSummary).toBeDefined();
+    expect(result.verificationSummary!.outOfScope).toBe(1);
   });
 });
