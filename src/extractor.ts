@@ -45,7 +45,7 @@ import type { ExtractionDeps } from './extraction/deps';
  * 根据 API URL 推断服务商名称，用于状态显示。
  * 自定义/未知地址回退到"AI"，避免写死 DeepSeek 造成误导。
  */
-function getProviderLabel(apiUrl: string): string {
+export function getProviderLabel(apiUrl: string): string {
   const lower = apiUrl.toLowerCase();
   if (lower.includes('siliconflow')) return 'SiliconFlow';
   if (lower.includes('deepseek')) return 'DeepSeek';
@@ -382,6 +382,11 @@ export interface ExtractorConfig extends ApiConfig, PipelineRuntime, DedupConfig
    * 生产环境不传；任一函数缺失时回退到对应真实实现。
    */
   deps?: Partial<ExtractionDeps>;
+  /**
+   * 提炼整体超时（毫秒）。覆盖默认 EXTRACTION_TIMEOUT_MS。
+   * 生产环境通常不传（沿用常量）；测试可注入极小值以驱动超时分支。
+   */
+  extractionTimeoutMs?: number;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
@@ -716,8 +721,9 @@ export async function runExtraction(
   const urlTitle = readResult.title;
   const urlPublishDate = readResult.publishDate;
 
-  // 整体超时保护（深度模式给更长时间）
-  const timeoutMs = fullConfig.enableDeepMode ? EXTRACTION_TIMEOUT_MS * 2 : EXTRACTION_TIMEOUT_MS;
+  // 整体超时保护（深度模式给更长时间）。timeoutMs 可由 config.extractionTimeoutMs 覆盖（P2：可配置/可注入）
+  const baseTimeoutMs = fullConfig.extractionTimeoutMs ?? EXTRACTION_TIMEOUT_MS;
+  const timeoutMs = fullConfig.enableDeepMode ? baseTimeoutMs * 2 : baseTimeoutMs;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const timeoutPromise = new Promise<ExtractionResult>((resolve) => {

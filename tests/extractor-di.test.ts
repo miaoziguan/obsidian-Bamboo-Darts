@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as obsidian from 'obsidian';
-import { runExtraction } from '../src/extractor';
+import { runExtraction, getProviderLabel } from '../src/extractor';
 import type { ExtractorConfig, ExtractionDeps } from '../src/extractor';
 import type { AtomicNote } from '../src/utils/notes-standards';
 import type { VaultMatchInfo, DuplicateInfo } from '../src/deduplicator';
@@ -265,6 +265,105 @@ describe('extractor DI 脚手架', () => {
     expect(result.verificationSummary!.outOfScope).toBe(1);
   });
 
+  // ── Task 3a：Phase 4b 低相似度 else 分支（保留无 pending）──
+
+  it('注入低相似度 matchInfo → 笔记保留但无 pending（else 分支）', async () => {
+    const noteA = makeNote('a', '笔记A', '笔记A的内容');
+    const noteB = makeNote('b', '笔记B', '笔记B的内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA, noteB] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    // bestMatch 相似度 0.3，低于 midThreshold(0.55) → 走 else 保留分支（无 pending）
+    const lowMatch: VaultMatchInfo = {
+      note: noteB,
+      noteIndex: 1,
+      bestMatch: { similarity: 0.3, path: 'existing/b.md', content: '已有' },
+    };
+    const noMatch: VaultMatchInfo = {
+      note: noteA,
+      noteIndex: 0,
+      bestMatch: null,
+    };
+    const vaultSpy = vi.fn(async () => [noMatch, lowMatch]);
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      checkAgainstVaultDetailed: vaultSpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证知识库去重阶段在低相似度匹配时笔记被保留且不产生任何待确认项' },
+      makeConfig(deps, { enableVaultDedup: true, autoClassify: false, profile: 'balanced', vault: new (await import('obsidian')).Vault() }),
+    );
+
+    expect(result.success).toBe(true);
+    // 两条笔记全部保留
+    expect(result.notes!.length).toBe(2);
+    // 低相似度不进入 pending
+    expect(result.vaultDedupPending).toBeUndefined();
+    expect(result.duplicateHints).toBeUndefined();
+  });
+
+  // ── Task 3b：verifyClaims 返回 error 分支（L248）──
+
+  it('注入 verifyClaims 返回 error → 管线标记核查出错且不抛出', async () => {
+    const noteA = makeNote('a', '正常', '正常笔记内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    const verifySpy = vi.fn(async () => ({
+      traced: 0,
+      needsCompare: 0,
+      outOfScope: 0,
+      error: '核查服务调用失败',
+    }));
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      verifyClaims: verifySpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证内容核查阶段在核查服务报错时管线能优雅标记错误而不是崩溃' },
+      makeConfig(deps, { factCheck: true }),
+    );
+
+    expect(verifySpy).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    // 出错分支：verificationSummary 仍返回，但 notes 未受影响
+    expect(result.verificationSummary).toBeDefined();
+    expect(result.verificationSummary!.traced).toBe(0);
+  });
+
+  // ── Task 3c：verifiedOnly 的 else 分支（启用 factCheck 但不 verifiedOnly，走完整统计文案）──
+
+  it('启用 factCheck 但不 verifiedOnly → 走 else 统计文案分支（不过滤）', async () => {
+    const noteA = makeNote('a', '正常', '正常笔记内容');
+    const noteB = makeNote('b', '超源', '超源笔记内容');
+    noteB.verification = [{ status: '超源', claim: '某声明', evidence: '原文', sourceQuote: '' }] as unknown as AtomicNote['verification'];
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA, noteB] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    const verifySpy = vi.fn(async () => ({ traced: 1, needsCompare: 1, outOfScope: 1 }));
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      verifyClaims: verifySpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证内容核查阶段在未开启 verifiedOnly 时仍输出超源统计但不过滤任何笔记' },
+      makeConfig(deps, { factCheck: true, verifiedOnly: false }),
+    );
+
+    expect(result.success).toBe(true);
+    // 不过滤：两条都保留
+    expect(result.notes!.length).toBe(2);
+    // verificationSummary 完整
+    expect(result.verificationSummary).toBeDefined();
+    expect(result.verificationSummary!.outOfScope).toBe(1);
+  });
+
   // ── Task 4：Phase 1 URL Jina 渲染回退分支 ──
 
   it('URL 主提取 REQUIRES_JS → Jina Reader 成功回退返回正文', async () => {
@@ -294,6 +393,276 @@ describe('extractor DI 脚手架', () => {
     expect(requestUrlSpy).toHaveBeenCalledTimes(2);
     // 主 URL + Jina 各一次；管线应走到 Phase 3（证明 URL 读取成功）
     expect(extractSpy).toHaveBeenCalledTimes(1);
+    requestUrlSpy.mockRestore();
+  });
+
+  // ── Task 4a：内容截断分支（L713 content.length > truncateLength）──
+
+  it('注入 inputTruncateLength 小于原文 → Phase 3 收到截断后内容', async () => {
+    let receivedContent = '';
+    const extractSpy = vi.fn(async (c: string) => {
+      receivedContent = c;
+      return { success: true, notes: [makeNote('n1', '截断笔记', '这是截断后的笔记内容')] };
+    });
+    const deps: Partial<ExtractionDeps> = { extractAtomicNotes: extractSpy };
+
+    const longContent = 'X'.repeat(200) + '这是需要被截断的超长测试文本用于验证内容截断分支确实生效而不是把整段原文发送给 AI 接口';
+    const result = await runExtraction(
+      { type: 'text', content: longContent },
+      makeConfig(deps, { inputTruncateLength: 50 }),
+    );
+
+    expect(result.success).toBe(true);
+    // AI 收到的应被截断到 50 字
+    expect(receivedContent.length).toBe(50);
+    expect(receivedContent).not.toContain('这是需要被截断');
+  });
+
+  // ── Task 4b：深度模式分支（L845 enableDeepMode && 超长 → extractChunked）──
+
+  it('启用深度模式且超长 → 走 extractChunked 而非普通 AI 提炼', async () => {
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [] }));
+    const chunkSpy = vi.fn(async () => [makeNote('c1', '分段笔记', '深度模式分段提炼产出的笔记')]);
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      extractChunked: chunkSpy,
+    };
+
+    const longContent = 'Y'.repeat(200) + '深度模式分段提炼测试文本用于验证超长内容在开启深度模式时走分段提炼路径而不是单次调用普通提炼接口';
+    const result = await runExtraction(
+      { type: 'text', content: longContent },
+      makeConfig(deps, { enableDeepMode: true, inputTruncateLength: 50 }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(chunkSpy).toHaveBeenCalledTimes(1);
+    // 普通提炼未被调用
+    expect(extractSpy).not.toHaveBeenCalled();
+    expect(result.notes![0].id).toBe('c1');
+  });
+
+  // ── Task 4c：中途取消检查点（L899 Phase 4b → 5）──
+
+  it('Phase 4 去重后在 4b→5 检查点 abort → 返回取消', async () => {
+    const noteA = makeNote('a', '笔记A', '笔记A的内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+
+    const ctrl = new AbortController();
+    // 在 crossCheckBatch（Phase 4）完成后、进入 4b 检查点前 abort
+    const dedupAbortSpy = vi.fn(async (notes: AtomicNote[]) => {
+      ctrl.abort();
+      return { uniqueNotes: notes, duplicates: [] };
+    });
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupAbortSpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证同批去重完成后在下一个取消检查点能正确检测到已中止信号并返回取消结果' },
+      makeConfig(deps, { signal: ctrl.signal }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('取消');
+  });
+
+  // ── Task 4d：Phase 5 → 6 检查点取消（L931）──
+
+  it('Phase 5 核查后在 5→6 检查点 abort → 返回取消', async () => {
+    const noteA = makeNote('a', '笔记A', '笔记A的内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    const verifySpy = vi.fn(async () => {
+      // 核查完成后 abort，触发 5→6 检查点
+      return { traced: 1, needsCompare: 0, outOfScope: 0 };
+    });
+
+    const ctrl = new AbortController();
+    const verifyAbortSpy = vi.fn(async (...args: unknown[]) => {
+      ctrl.abort();
+      return { traced: 1, needsCompare: 0, outOfScope: 0 };
+    });
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      verifyClaims: verifyAbortSpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证内容核查完成后在下一个取消检查点能正确检测到已中止信号并返回取消结果' },
+      makeConfig(deps, { factCheck: true, signal: ctrl.signal }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('取消');
+  });
+
+  // ── Task 5a：reviewNotes 失败 → 降级使用原始笔记（L313）──
+
+  it('注入 reviewNotes 返回 success:false → 降级保留原始笔记', async () => {
+    const noteA = makeNote('a', '笔记A', '笔记A内容');
+    const noteB = makeNote('b', '笔记B', '笔记B内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA, noteB] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    // 复查「失败」：内部降级返回原始笔记
+    const reviewSpy = vi.fn(async () => ({
+      reviewedNotes: [noteA, noteB],
+      reviewDetails: [],
+      success: false,
+    }));
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      reviewNotes: reviewSpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证复查阶段失败时管线降级保留原始笔记而不是丢弃任何内容' },
+      makeConfig(deps, { enableReview: true }),
+    );
+
+    expect(result.success).toBe(true);
+    // 降级：两条都保留
+    expect(result.notes!.length).toBe(2);
+  });
+
+  // ── Task 5b：reviewNotes 成功但无过滤（L317 else 分支）──
+
+  it('启用复查且全部保留 → 走「无低质量笔记」文案分支', async () => {
+    const noteA = makeNote('a', '笔记A', '笔记A内容');
+    const noteB = makeNote('b', '笔记B', '笔记B内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA, noteB] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    const reviewSpy = vi.fn(async () => ({
+      reviewedNotes: [noteA, noteB],
+      reviewDetails: [
+        { index: 0, insightScore: 5, knowledgeScore: 5, finalScore: 10, verdict: '保留', reason: '好' },
+        { index: 1, insightScore: 5, knowledgeScore: 5, finalScore: 10, verdict: '保留', reason: '好' },
+      ],
+      success: true,
+    }));
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      reviewNotes: reviewSpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证复查阶段在全部笔记通过评分时走无过滤文案分支且笔记数量不变' },
+      makeConfig(deps, { enableReview: true }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.notes!.length).toBe(2);
+    // tracker 文案含「无低质量笔记」
+    const summary = result.steps.map((s) => s.message).join(' ');
+    expect(summary).toContain('无低质量笔记');
+  });
+
+  // ── Task 5c：getProviderLabel 各厂商（L50-53）──
+
+  it('getProviderLabel 正确识别各服务商', () => {
+    expect(getProviderLabel('https://api.siliconflow.cn/v1/chat/completions')).toBe('SiliconFlow');
+    expect(getProviderLabel('https://api.deepseek.com/v1/chat/completions')).toBe('DeepSeek');
+    expect(getProviderLabel('https://api.openai.com/v1/chat/completions')).toBe('OpenAI');
+    expect(getProviderLabel('https://hunyuan.tencentcloudapi.com/v1')).toBe('Hunyuan');
+    // 自定义/未知地址回退 AI
+    expect(getProviderLabel('https://my-custom-llm.example.com/v1')).toBe('AI');
+  });
+
+  // ── Task 5d：semanticProgressBridge 存在分支（L114，有 onProgress 时）──
+
+  it('启用 vault dedup 且传 onProgress → semanticProgressBridge 回调被触发', async () => {
+    const noteA = makeNote('a', '笔记A', '笔记A的内容');
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [noteA] }));
+    const dedupSpy = vi.fn(async (notes: AtomicNote[]) => ({ uniqueNotes: notes, duplicates: [] }));
+    const vaultSpy = vi.fn(async () => [
+      { note: noteA, noteIndex: 0, bestMatch: null } as VaultMatchInfo,
+    ]);
+    const progressEvents: unknown[] = [];
+    const onProgress = vi.fn((_ev: unknown, _all: unknown[], _elapsed: number) => {
+      progressEvents.push(_ev);
+    });
+
+    const deps: Partial<ExtractionDeps> = {
+      extractAtomicNotes: extractSpy,
+      crossCheckBatch: dedupSpy,
+      checkAgainstVaultDetailed: vaultSpy,
+    };
+
+    const result = await runExtraction(
+      { type: 'text', content: '一段足够长的测试文本用于验证知识库去重阶段在有进度回调时能正确触发语义向量加载的桥接回调' },
+      makeConfig(deps, {
+        enableVaultDedup: true,
+        autoClassify: false,
+        profile: 'balanced',
+        vault: new (await import('obsidian')).Vault(),
+        onProgress,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    // 进度回调被调用（含语义去重桥接事件）
+    expect(onProgress).toHaveBeenCalled();
+  });
+
+  // ── Task 5e：Jina Reader 失败 catch 分支（L552）──
+
+  it('URL 主提取 REQUIRES_JS 但 Jina 抛错 → 回到失败路径', async () => {
+    const requestUrlSpy = vi.spyOn(obsidian, 'requestUrl');
+    // 第一次：主 URL 极短 → REQUIRES_JS
+    requestUrlSpy.mockResolvedValueOnce({
+      status: 200,
+      text: '<html><body><div></div></body></html>',
+      json: {} as never,
+    } as never);
+    // 第二次：Jina 抛错
+    requestUrlSpy.mockRejectedValueOnce(new Error('Jina 网络错误'));
+
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [] }));
+    const result = await runExtraction(
+      { type: 'url', content: 'https://example.com/js-page' },
+      makeConfig({ extractAtomicNotes: extractSpy }, { skipGate: true, maxTokens: 100 }),
+    );
+
+    // Jina 失败 → 回到 extractResult 失败路径，URL 读取失败
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
+    requestUrlSpy.mockRestore();
+  });
+
+  // ── Task 5f：Jina Reader 返回 "Title:" 格式解析（L533）──
+
+  it('URL Jina 返回 Title: 格式 → 正确解析标题与正文', async () => {
+    const requestUrlSpy = vi.spyOn(obsidian, 'requestUrl');
+    requestUrlSpy.mockResolvedValueOnce({
+      status: 200,
+      text: '<html><body><div></div></body></html>',
+      json: {} as never,
+    } as never);
+    const jinaBody =
+      'Title: 解析标题\n---\n这是通过 Jina 返回的标题加正文格式内容，长度需要超过五十个字符以进入回退渲染分支并顺利通过后续门控与提炼流程验证标题解析逻辑正确。';
+    requestUrlSpy.mockResolvedValueOnce({
+      status: 200,
+      text: jinaBody,
+      json: {} as never,
+    } as never);
+
+    const extractSpy = vi.fn(async () => ({ success: true, notes: [makeNote('n1', 't', 'c')] }));
+    const result = await runExtraction(
+      { type: 'url', content: 'https://example.com/js-page-title' },
+      makeConfig({ extractAtomicNotes: extractSpy }, { skipGate: true, maxTokens: 100 }),
+    );
+
+    expect(extractSpy).toHaveBeenCalledTimes(1);
+    // 管线走到 Phase 3 证明 URL 读取成功（标题解析分支被执行）
+    expect(result.success).toBe(true);
     requestUrlSpy.mockRestore();
   });
 });
