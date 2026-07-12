@@ -39,6 +39,7 @@ import {
   ProgressTracker,
 } from './extraction/progress';
 import { fnv1aHash } from './utils/hash';
+import type { ExtractionDeps } from './extraction/deps';
 
 /**
  * 根据 API URL 推断服务商名称，用于状态显示。
@@ -90,6 +91,7 @@ async function runVaultDedupPhase(
   config: ExtractorConfig,
   profileConfig: ProfileConfig,
   tracker: ProgressTracker,
+  deps: ReturnType<typeof resolveDeps>,
 ): Promise<{
   notes: AtomicNote[];
   vaultDedupResult?: DedupResult;
@@ -123,7 +125,7 @@ async function runVaultDedupPhase(
         }
       : undefined;
 
-  const matchInfos: VaultMatchInfo[] = await checkAgainstVaultDetailed(
+  const matchInfos: VaultMatchInfo[] = await deps.checkAgainstVaultDetailed(
     config.vault,
     notes,
     config.dedupTargetFolder?.trim() || config.targetFolder || '',
@@ -210,7 +212,8 @@ async function runFactCheckPhase(
   config: ExtractorConfig,
   vaultDedupPending: PendingDuplicate[],
   tracker: ProgressTracker,
-  fullContent?: string,
+  fullContent: string | undefined,
+  deps: ReturnType<typeof resolveDeps>,
 ): Promise<{
   notes: AtomicNote[];
   verificationSummary?: { traced: number; needsCompare: number; outOfScope: number };
@@ -223,7 +226,7 @@ async function runFactCheckPhase(
   }
 
   tracker.start('Phase 5', '内容核查', '正在溯源和比对...');
-  const verifyResult = await verifyClaims(
+  const verifyResult = await deps.verifyClaims(
     truncatedContent,
     notes,
     {
@@ -274,6 +277,7 @@ async function runReviewPhase(
   profileConfig: ProfileConfig,
   vaultDedupPending: PendingDuplicate[],
   tracker: ProgressTracker,
+  deps: ReturnType<typeof resolveDeps>,
 ): Promise<{
   notes: AtomicNote[];
   vaultDedupPending: PendingDuplicate[];
@@ -296,7 +300,7 @@ async function runReviewPhase(
     minScore: profileConfig.reviewMinScore,
   };
 
-  const reviewResult = await reviewNotes(notes, reviewConfig);
+  const reviewResult = await deps.reviewNotes(notes, reviewConfig);
 
   // 使用复查后的笔记（若复查失败，reviewNotes 内部已降级返回原始笔记）
   const filteredCount = notes.length - reviewResult.reviewedNotes.length;
@@ -373,6 +377,11 @@ export interface ExtractorConfig extends ApiConfig, PipelineRuntime, DedupConfig
   urlTitle?: string;
   /** URL 提取的发布时间（由 readContent 填充） */
   urlPublishDate?: string;
+  /**
+   * 测试注入点：覆盖下游依赖以驱动编排分支。
+   * 生产环境不传；任一函数缺失时回退到对应真实实现。
+   */
+  deps?: Partial<ExtractionDeps>;
 }
 
 const DEFAULT_CONFIG: ExtractorConfig = {
@@ -654,6 +663,26 @@ export interface PendingDuplicate {
   localSimilarity?: number;
 }
 
+// ─── 下游依赖解析：注入优先，真实兜底 ───
+// 将静态导入的真实实现保存为常量，deps 缺失时回退到它们。
+// 生产路径永远走真实实现，确保行为不变。
+
+function resolveDeps(config: ExtractorConfig): Required<Pick<ExtractionDeps,
+  'extractAtomicNotes' | 'extractChunked' | 'crossCheckBatch' | 'checkAgainstVaultDetailed' | 'verifyClaims' | 'reviewNotes' | 'classifyContent' | 'resolveProfileConfig' | 'runGateChecks'>> {
+  const d = config.deps ?? {};
+  return {
+    extractAtomicNotes: d.extractAtomicNotes ?? extractAtomicNotes,
+    extractChunked: d.extractChunked ?? extractChunked,
+    crossCheckBatch: d.crossCheckBatch ?? crossCheckBatch,
+    checkAgainstVaultDetailed: d.checkAgainstVaultDetailed ?? checkAgainstVaultDetailed,
+    verifyClaims: d.verifyClaims ?? verifyClaims,
+    reviewNotes: d.reviewNotes ?? reviewNotes,
+    classifyContent: d.classifyContent ?? classifyContent,
+    resolveProfileConfig: d.resolveProfileConfig ?? resolveProfileConfig,
+    runGateChecks: d.runGateChecks ?? runGateChecks,
+  };
+}
+
 export async function runExtraction(
   input: {
     type: 'url' | 'text' | 'selection';
@@ -708,7 +737,7 @@ export async function runExtraction(
 
   try {
     return await Promise.race([
-      runExtractionPhases(input.type, content, truncatedContent, fullConfig, tracker, config, truncateLength, urlTitle, urlPublishDate),
+      runExtractionPhases(input.type, content, truncatedContent, fullConfig, tracker, config, truncateLength, urlTitle, urlPublishDate, resolveDeps(fullConfig)),
       timeoutPromise,
     ]);
   } finally {
@@ -729,7 +758,10 @@ async function runExtractionPhases(
   truncateLength: number,
   urlTitle?: string,
   urlPublishDate?: string,
+  deps?: ReturnType<typeof resolveDeps>,
 ): Promise<ExtractionResult> {
+  // 统一依赖解析：注入优先，真实兜底
+  const resolved = deps ?? resolveDeps(fullConfig);
   // 把 URL 标题和发布时间写入 config，供 AI prompt 使用
   if (urlTitle) fullConfig.urlTitle = urlTitle;
   if (urlPublishDate) fullConfig.urlPublishDate = urlPublishDate;
@@ -742,14 +774,14 @@ async function runExtractionPhases(
     detectedProfile = fullConfig.profile;
     profileSource = 'manual';
   } else if (fullConfig.autoClassify !== false) {
-    detectedProfile = classifyContent(truncatedContent);
+    detectedProfile = resolved.classifyContent(truncatedContent);
     profileSource = 'auto';
   } else {
     detectedProfile = 'balanced';
     profileSource = 'manual';
   }
 
-  const activeProfileConfig = resolveProfileConfig(detectedProfile, fullConfig.profileConfigs);
+  const activeProfileConfig = resolved.resolveProfileConfig(detectedProfile, fullConfig.profileConfigs);
 
   // Phase 2: 质量门控（使用 Profile 差异化阈值，skipGate 时跳过）
   let gateResult: { passed: boolean; summary: string; reasons: string[]; warnings: string[] } = {
@@ -761,7 +793,7 @@ async function runExtractionPhases(
 
   if (!fullConfig.skipGate) {
     tracker.start('Phase 2', '质量门控', '开始检查...');
-    gateResult = runGateChecks(truncatedContent, activeProfileConfig, inputType);
+    gateResult = resolved.runGateChecks(truncatedContent, activeProfileConfig, inputType);
 
     if (!gateResult.passed) {
       tracker.fail(gateResult.summary);
@@ -783,7 +815,7 @@ async function runExtractionPhases(
   } else {
     // 强制提炼：仍运行门控检查（不阻断），收集警告供 ResultModal 展示
     tracker.start('Phase 2', '质量门控', '已跳过阻断（强制提炼）');
-    gateResult = runGateChecks(truncatedContent, activeProfileConfig, inputType);
+    gateResult = resolved.runGateChecks(truncatedContent, activeProfileConfig, inputType);
     if (gateResult.warnings.length > 0) {
       tracker.complete(`跳过门控，但检测到 ${gateResult.warnings.length} 条质量提醒`);
     } else {
@@ -816,7 +848,7 @@ async function runExtractionPhases(
       '提炼原子笔记（深度模式）',
       `${profileLabel} | 文本 ${content.length} 字，分段提炼中...`,
     );
-    const chunkedNotes = await extractChunked(content, fullConfig, truncateLength, tracker);
+    const chunkedNotes = await resolved.extractChunked(content, fullConfig, truncateLength, tracker);
     if (chunkedNotes.length === 0) {
       extractResult = { success: false, error: '深度提炼未产出任何笔记' };
     } else {
@@ -829,7 +861,7 @@ async function runExtractionPhases(
       '提炼原子笔记',
       `${profileLabel} | 正在调用 ${providerLabel} API...${truncateNote}`,
     );
-    extractResult = await extractAtomicNotes(truncatedContent, config);
+    extractResult = await resolved.extractAtomicNotes(truncatedContent, config);
   }
 
   if (!extractResult.success) {
@@ -846,7 +878,7 @@ async function runExtractionPhases(
 
   // Phase 4: 同批交叉去重
   tracker.start('Phase 4', '同批交叉去重', '开始去重...');
-  const dedupResult = await crossCheckBatch(notes, activeProfileConfig.crossBatchThreshold);
+  const dedupResult = await resolved.crossCheckBatch(notes, activeProfileConfig.crossBatchThreshold);
   tracker.complete(
     `去重后剩余 ${dedupResult.uniqueNotes.length} 条（去除 ${notes.length - dedupResult.uniqueNotes.length} 条重复）`,
   );
@@ -868,7 +900,7 @@ async function runExtractionPhases(
   }
 
   // Phase 4b: 知识库去重（可选）
-  const vaultResult = await runVaultDedupPhase(notes, fullConfig, activeProfileConfig, tracker);
+  const vaultResult = await runVaultDedupPhase(notes, fullConfig, activeProfileConfig, tracker, resolved);
   notes = vaultResult.notes;
   let vaultDedupResult = vaultResult.vaultDedupResult;
   let vaultDedupPending = vaultResult.vaultDedupPending;
@@ -887,6 +919,7 @@ async function runExtractionPhases(
     vaultDedupPending,
     tracker,
     content,
+    resolved,
   );
   notes = factCheckResult.notes;
   const verificationSummary = factCheckResult.verificationSummary;
@@ -905,6 +938,7 @@ async function runExtractionPhases(
     activeProfileConfig,
     vaultDedupPending,
     tracker,
+    resolved,
   );
   notes = reviewResult.notes;
   vaultDedupPending = reviewResult.vaultDedupPending;
