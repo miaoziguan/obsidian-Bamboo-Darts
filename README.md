@@ -166,7 +166,7 @@ AI 从两个维度对每条笔记打分（各 1-5 分）：
 
 - TypeScript
 - esbuild（构建工具）
-- vitest（单元测试，414 个测试）
+- vitest（单元测试，627 个测试）
 - ESLint + Prettier（代码质量）
 - GitHub Actions（CI + 增量覆盖率门禁）
 - DeepSeek API（AI 提炼）
@@ -186,6 +186,23 @@ A：默认保存到 `原子笔记` 文件夹，可在设置中自定义。
 
 **Q：API Key 安全吗？**  
 A：API Key 使用 AES-256-GCM 加密后存储在本地，密钥由机器指纹派生（平台 + 主机名 + 用户名），同步到其他设备无法解密。
+
+### 本地开发
+
+```bash
+npm install            # 安装依赖
+npm run dev            # 监听模式编译（带 sourcemap，不压缩）
+npm run build          # 正式版编译（压缩）
+npm run test           # 运行单元测试
+npm run test:coverage  # 运行测试并生成覆盖率报告
+npm run lint           # ESLint 检查
+npm run lint:fix       # ESLint 自动修复
+npm run gate           # 质量门禁：lint 零告警 + 覆盖率达标
+npm run sync           # 编译并同步到 ../test-vault 测试仓库
+npm run sync --dev     # 同步开发版（带 sourcemap）
+```
+
+测试覆盖率门槛：行/语句 82%、分支/函数 80%；新增代码需满足 60% 增量覆盖率门禁（CI 自动校验）。
 
 ### 更新日志
 

@@ -57,30 +57,12 @@ echo ""
 
 cd "$PROJECT_DIR"
 
+# dev 与 production 统一复用 esbuild.config.mjs 的 external 列表，
+# 避免 sync.sh 与 esbuild.config.mjs 维护两份重复的 @codemirror external。
 if [ "$MODE" = "production" ]; then
   node esbuild.config.mjs production 2>&1 || error "编译失败"
 else
-  # dev 模式：用 esbuild 直接编译（带 sourcemap，不压缩）
-  npx esbuild src/main.ts \
-    --bundle \
-    --external:obsidian --external:electron --external:crypto \
-    --external:stream --external:http --external:https --external:url \
-    --external:zlib --external:util --external:path --external:fs --external:os \
-    --external:@codemirror/autocomplete --external:@codemirror/closebrackets \
-    --external:@codemirror/collab --external:@codemirror/commands \
-    --external:@codemirror/comment --external:@codemirror/fold \
-    --external:@codemirror/gutter --external:@codemirror/highlight \
-    --external:@codemirror/history --external:@codemirror/language \
-    --external:@codemirror/lint --external:@codemirror/matchbrackets \
-    --external:@codemirror/panel --external:@codemirror/rangeset \
-    --external:@codemirror/rectangular-selection --external:@codemirror/search \
-    --external:@codemirror/state --external:@codemirror/stream-parser \
-    --external:@codemirror/text --external:@codemirror/tooltip \
-    --external:@codemirror/view \
-    --format=cjs --target=es2020 \
-    --sourcemap=inline \
-    --outfile=main.js \
-    --log-level=info 2>&1 || error "编译失败"
+  node esbuild.config.mjs dev 2>&1 || error "编译失败"
 fi
 
 info "编译成功"

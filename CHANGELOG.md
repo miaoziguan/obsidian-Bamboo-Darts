@@ -5,6 +5,12 @@
 ### 发布维护
 - 版本号升级至 2.1.8，重新编译正式版（production 压缩）并同步到测试仓库
 - 同步发布 manifest.json / package.json / versions.json 三处版本号
+- 创建 GitHub Release 并上传 main.js / manifest.json / styles.css 三个发布资源
+
+### 工程改进（同日复盘）
+- sync.sh dev 模式复用 esbuild.config.mjs，消除与构建配置重复的 external 列表（DRY）
+- README 同步测试数（414 → 455）并补充「本地开发」章节
+- 死代码审计文档标注修复状态，避免误导后续维护
 
 ---
 

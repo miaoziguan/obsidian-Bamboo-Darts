@@ -4,6 +4,8 @@
 > 审计范围：`src/` 下所有 40 个 TypeScript 源文件
 > 方法：全量 import/export 交叉引用 + 内部调用链分析
 
+> **修订状态（2026-07-14）**：本报告所列问题（saveNote 死函数、StorageConfig 死导出、gate ok/warn/block 死导出、Jaccard 重复逻辑、isSemanticDedupEnabled 死导入、ExtractorConfig 幽灵字段等）均已在 v2.0.0 ~ v2.1.7 期间通过死代码清理提交修复。以下条目仅作历史留档，不再反映当前代码状态。
+
 ---
 
 ## 一、确认死代码

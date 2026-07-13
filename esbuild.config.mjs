@@ -7,7 +7,10 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const prod = process.argv[2] === "production";
+const mode = process.argv[2];
+const prod = mode === "production";
+// dev 模式：一次性编译（带 sourcemap、不压缩），供 sync.sh --dev 同步调试版使用
+const oneShotDev = mode === "dev";
 
 const context = await esbuild.context({
   banner: {
@@ -59,7 +62,7 @@ const context = await esbuild.context({
   minify: prod,
 });
 
-if (prod) {
+if (prod || oneShotDev) {
   await context.rebuild();
   process.exit(0);
 } else {
