@@ -17,10 +17,10 @@ export default defineConfig({
         'src/types.ts',
       ],
       thresholds: {
-        lines: 75,
+        lines: 82,
         branches: 80,
-        functions: 75,
-        statements: 75,
+        functions: 80,
+        statements: 82,
       },
     },
   },
