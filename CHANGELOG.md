@@ -1,5 +1,13 @@
 # Bamboo Darts 更新日志
 
+## v2.1.8 (2026-07-13)
+
+### 发布维护
+- 版本号升级至 2.1.8，重新编译正式版（production 压缩）并同步到测试仓库
+- 同步发布 manifest.json / package.json / versions.json 三处版本号
+
+---
+
 ## v2.0.0 (2026-06-22)
 
 ### 架构重构与工程优化
