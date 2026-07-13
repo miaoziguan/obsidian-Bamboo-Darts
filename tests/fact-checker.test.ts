@@ -159,4 +159,113 @@ describe('verifyClaims', () => {
     expect(r.notes[0].verification!.length).toBe(1);
     expect(r.notes[0].tracedCount).toBe(1);
   });
+
+  it('AI 需对比且 sourceText 真实存在于原文 → 记为需对比', async () => {
+    const content = '这段原文里包含一句可被引用的关键句子作为佐证材料。';
+    // note 内容会提取出 2 条 claim，AI 对每条都返回"需对比"且 sourceText 真实存在
+    mockRequestUrl.mockResolvedValueOnce({
+      status: 200,
+      text: '',
+      json: {
+        choices: [{
+          message: {
+            content: JSON.stringify([
+              {
+                index: 0,
+                status: '需对比',
+                sourceText: '这段原文里包含一句可被引用的关键句子作为佐证材料。',
+                diffNote: '措辞不同',
+              },
+              {
+                index: 1,
+                status: '需对比',
+                sourceText: '这段原文里包含一句可被引用的关键句子作为佐证材料。',
+                diffNote: '措辞不同',
+              },
+            ]),
+          },
+        }],
+      },
+    } as any);
+    // 声明含数值以触发 extractVerifiableClaims，但 Layer1 未命中
+    const r = await verifyNotes(content, [makeNote('n1', '数据显示增长了88%。')]);
+    expect(r.needsCompare).toBe(2);
+    expect(r.outOfScope).toBe(0);
+  });
+
+  it('AI 需对比但 sourceText 编造（不在原文）→ 降级超源', async () => {
+    mockRequestUrl.mockResolvedValueOnce({
+      status: 200,
+      text: '',
+      json: {
+        choices: [{
+          message: {
+            content: JSON.stringify([
+              { index: 0, status: '需对比', sourceText: '这句原文根本不存在于给定文本中xyz', diffNote: 'x' },
+            ]),
+          },
+        }],
+      },
+    } as any);
+    const r = await verifyNotes('完全无关的原文内容。', [makeNote('n1', '增长了88%。')]);
+    expect(r.outOfScope).toBe(1);
+    expect(r.needsCompare).toBe(0);
+  });
+
+  it('AI 返回意外 status → 降级超源', async () => {
+    // status 既非"需对比"也非"超源"，semanticCompare 内部归一化为"超源"
+    mockRequestUrl.mockResolvedValueOnce({
+      status: 200,
+      text: '',
+      json: {
+        choices: [{
+          message: {
+            content: JSON.stringify([{ index: 0, status: '未知状态' }]),
+          },
+        }],
+      },
+    } as any);
+    const r = await verifyNotes('无关原文。', [makeNote('n1', '增长了88%。')]);
+    expect(r.outOfScope).toBe(1);
+  });
+
+  it('AI 显式返回超源 + reason', async () => {
+    mockRequestUrl.mockResolvedValueOnce({
+      status: 200,
+      text: '',
+      json: {
+        choices: [{
+          message: {
+            content: JSON.stringify([{ index: 0, status: '超源', reason: '原文无此内容' }]),
+          },
+        }],
+      },
+    } as any);
+    const r = await verifyNotes('无关原文。', [makeNote('n1', '增长了88%。')]);
+    expect(r.outOfScope).toBe(1);
+    const item = r.notes[0].verification!.find((v) => v.status === '超源');
+    expect(item?.reason).toContain('原文无此内容');
+  });
+
+  it('semanticCompare 返回非 200 → 抛错 → 全部降级超源', async () => {
+    mockRequestUrl.mockResolvedValueOnce({
+      status: 500,
+      text: '',
+      json: {},
+    } as any);
+    const r = await verifyNotes('无关原文。', [makeNote('n1', '增长了88%。')]);
+    expect(r.outOfScope).toBe(1);
+    const item = r.notes[0].verification!.find((v) => v.status === '超源');
+    expect(item?.reason).toContain('语义比对失败');
+  });
+
+  it('AI 返回无法解析的 JSON → resultMap 为空 → Layer3 超源兜底', async () => {
+    mockRequestUrl.mockResolvedValueOnce({
+      status: 200,
+      text: '',
+      json: { choices: [{ message: { content: '这不是JSON' } }] },
+    } as any);
+    const r = await verifyNotes('无关原文。', [makeNote('n1', '增长了88%。')]);
+    expect(r.outOfScope).toBe(1);
+  });
 });

@@ -83,5 +83,34 @@ describe('backlink-service', () => {
 
       expect(editor.getContent()).toContain('\n\n[[test]]\n');
     });
+
+    it('文件名去后缀后为空时计为失败并跳过', () => {
+      const editor = new MockEditor();
+      // 'foo/.md' → pop='.md' → replace(/\.md$/)='' → noteName 为空
+      const result = insertBacklinks(editor as any, ['foo/.md']);
+      expect(result.success).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(editor.getContent()).toBe('');
+    });
+
+    it('editor.replaceRange 抛错时计入 failed 并继续', () => {
+      class ThrowingEditor extends MockEditor {
+        replaceRange(): void {
+          throw new Error('编辑器写入失败');
+        }
+      }
+      const editor = new ThrowingEditor();
+      const result = insertBacklinks(editor as any, ['Notes/a.md', 'Notes/b.md']);
+      expect(result.success).toBe(0);
+      expect(result.failed).toBe(2);
+    });
+
+    it('部分成功部分失败混合统计', () => {
+      const editor = new MockEditor();
+      // 一个正常 + 一个空名
+      const result = insertBacklinks(editor as any, ['Notes/正常.md', 'x/.md']);
+      expect(result.success).toBe(1);
+      expect(result.failed).toBe(1);
+    });
   });
 });

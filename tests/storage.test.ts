@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { App } from 'obsidian';
+import { App, Vault } from 'obsidian';
 import {
   generateFileName,
   sanitizeFileName,
@@ -74,6 +74,18 @@ describe('escapeYamlValue', () => {
     const result = escapeYamlValue('路径\\文件');
     expect(result).toContain('\\\\');
   });
+
+  it('含换行的值应使用双引号并转义换行', () => {
+    const result = escapeYamlValue('第一行\n第二行');
+    expect(result).toMatch(/^".*"$/);
+    expect(result).toContain('\\n');
+  });
+
+  it('含回车的值应转义为 \\r', () => {
+    const result = escapeYamlValue('a\r\nb');
+    expect(result).toContain('\\r');
+    expect(result).toContain('\\n');
+  });
 });
 
 // ─── generateFileName 测试 ───
@@ -109,6 +121,19 @@ describe('generateFileName', () => {
     const note = makeNote({ title: '' });
     const fileName = generateFileName('{{title}}', note);
     expect(fileName).toMatch(/^note-\d+$/);
+  });
+
+  it('应替换 {{timestamp}} 模板变量', () => {
+    const note = makeNote({ title: 'T' });
+    const fileName = generateFileName('{{timestamp}}-{{title}}', note);
+    expect(fileName).toMatch(/^\d+-T$/);
+  });
+
+  it('标题被清理为空但模板非空时仍生成有效名', () => {
+    // 标题全为非法字符 → sanitize 后走时间戳兜底
+    const note = makeNote({ title: '///' });
+    const fileName = generateFileName('{{title}}', note);
+    expect(fileName.trim().length).toBeGreaterThan(0);
   });
 });
 
@@ -197,5 +222,76 @@ describe('saveNotes', () => {
     const result = await saveNotes(app, notes, { targetFolder: '' });
     expect(result.success).toBe(1);
     expect(result.paths[0]).toContain('原子笔记/');
+  });
+
+  it('config 未传 targetFolder 时使用默认值', async () => {
+    const notes = [makeNote()];
+    const result = await saveNotes(app, notes);
+    expect(result.success).toBe(1);
+    expect(result.paths[0]).toContain('原子笔记/');
+  });
+
+  it('单条 create 抛错时记入 failed 且继续处理其余', async () => {
+    // create 对第一条抛错，其余正常
+    let call = 0;
+    class FailingVault extends Vault {
+      async create(path: string, content: string) {
+        call++;
+        if (call === 1) throw new Error('磁盘写入失败');
+        return super.create(path, content);
+      }
+    }
+    class FailApp extends App {
+      vault = new FailingVault();
+    }
+    const failApp = new FailApp();
+    const notes = [makeNote({ title: '会失败' }), makeNote({ title: '会成功' })];
+    const result = await saveNotes(failApp, notes, { targetFolder: 'Notes' });
+    expect(result.success).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.errors).toContain('磁盘写入失败');
+  });
+
+  it('create 抛非 Error 值时转为字符串记录', async () => {
+    class FailingVault extends Vault {
+      async create(_path: string, _content: string): Promise<never> {
+        throw 'plain string error';
+      }
+    }
+    class FailApp extends App {
+      vault = new FailingVault();
+    }
+    const failApp = new FailApp();
+    const result = await saveNotes(failApp, [makeNote()], { targetFolder: 'Notes' });
+    expect(result.failed).toBe(1);
+    expect(result.errors[0]).toContain('plain string error');
+  });
+
+  it('createFolder 抛错时整批失败', async () => {
+    class FailingVault extends Vault {
+      getAbstractFileByPath() {
+        return null;
+      }
+      async createFolder(): Promise<void> {
+        throw new Error('无权限创建文件夹');
+      }
+    }
+    class FailApp extends App {
+      vault = new FailingVault();
+    }
+    const failApp = new FailApp();
+    const notes = [makeNote(), makeNote()];
+    const result = await saveNotes(failApp, notes, { targetFolder: 'Notes' });
+    expect(result.success).toBe(0);
+    expect(result.failed).toBe(2);
+    expect(result.errors[0]).toContain('无权限创建文件夹');
+  });
+
+  it('目标文件夹已存在时不再创建', async () => {
+    // 预置一个已存在文件使 getAbstractFileByPath 返回 TFolder
+    app.vault.addFile('Notes/existing.md', 'x');
+    const notes = [makeNote({ title: '新笔记' })];
+    const result = await saveNotes(app, notes, { targetFolder: 'Notes' });
+    expect(result.success).toBe(1);
   });
 });
