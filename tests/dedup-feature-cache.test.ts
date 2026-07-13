@@ -84,4 +84,40 @@ describe('DedupFeatureCache', () => {
     expect(cache.getFolder('notes')).toBeNull();
     expect(Object.keys(cache.getAllFolders())).toHaveLength(0);
   });
+
+  it('未初始化的缓存（adapter 为空）load/save 应安全跳过', async () => {
+    const uninit = new DedupFeatureCache();
+    // 不应抛错
+    await expect(uninit.load()).resolves.toBeUndefined();
+    await expect(uninit.save()).resolves.toBeUndefined();
+  });
+
+  it('getFolder 对已删除/不存在的文件夹应返回 null', () => {
+    expect(cache.getFolder('never-existed')).toBeNull();
+    cache.setFolder('temp', { timestamp: 1, entries: [], dfCounts: [] });
+    cache.deleteFolder('temp');
+    expect(cache.getFolder('temp')).toBeNull();
+  });
+
+  it('load 时文件存在但 folders 字段缺失/非对象应重置', async () => {
+    await adapter.write(
+      '/plugin-dir/dedup-features.json',
+      JSON.stringify({ version: 1, updatedAt: 0 }),
+    );
+    await cache.load();
+    expect(Object.keys(cache.getAllFolders())).toHaveLength(0);
+  });
+
+  it('load 时 JSON.parse 抛错应重置（损坏数据）', async () => {
+    await adapter.write('/plugin-dir/dedup-features.json', '{ bad json');
+    await cache.load();
+    expect(Object.keys(cache.getAllFolders())).toHaveLength(0);
+  });
+
+  it('deleteFolder 后 getAllFolders 不再包含该文件夹', () => {
+    cache.setFolder('a', { timestamp: 1, entries: [], dfCounts: [] });
+    cache.setFolder('b', { timestamp: 1, entries: [], dfCounts: [] });
+    cache.deleteFolder('a');
+    expect(Object.keys(cache.getAllFolders())).toEqual(['b']);
+  });
 });
