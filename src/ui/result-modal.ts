@@ -177,8 +177,6 @@ export class ResultModal extends Modal {
       hintEl.textContent = isOpen ? '点击收起' : '点击展开';
     });
 
-    const hintEl = header.lastChild as HTMLElement;
-
     for (let i = 0; i < dups.length; i++) {
       const dup = dups[i];
       const card = detailContainer.createEl('div', {

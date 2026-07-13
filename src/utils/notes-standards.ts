@@ -477,7 +477,7 @@ function tryParseListFormat(text: string): AtomicNote[] {
 
   // 按常见的笔记分隔模式分割
   // 匹配：1. 或 1、或 ## 或 ### 开头的段落
-  const segments = text.split(/\n(?=\d+[\.\、]\s+\**|\#{1,3}\s)/);
+  const segments = text.split(/\n(?=\d+[.、]\s+\**|#{1,3}\s)/);
 
   for (const segment of segments) {
     const trimmed = segment.trim();
@@ -496,7 +496,7 @@ function tryParseListFormat(text: string): AtomicNote[] {
     const firstLine = lines[0].trim();
 
     // 模式 A: "1. **标题内容**" 或 "1. 标题内容"
-    const numberedMatch = firstLine.match(/^\d+[\.\、]\s+\**([^*\n]+)\**\s*$/);
+    const numberedMatch = firstLine.match(/^\d+[.、]\s+\**([^*\n]+)\**\s*$/);
     // 模式 B: "### 标题" 或 "## 标题"
     const headingMatch = firstLine.match(/^#{1,3}\s+(.+)$/);
     // 模式 C: "**标题**" （独立加粗行）
@@ -562,7 +562,7 @@ function tryParseListFormat(text: string): AtomicNote[] {
 export function cleanTitle(raw: string): string {
   let cleaned = raw.trim();
   // 去掉编号前缀: "1. " "1、" "①" "(1)" "（1）"
-  cleaned = cleaned.replace(/^(?:\d+[\.\、]\s*|[\[【\(（]?\d+[\]】\)）]\s*|^[①②③④⑤⑥⑦⑧⑨⑩]\s*)/, '');
+  cleaned = cleaned.replace(/^(?:\d+[.、]\s*|[【(（]?\d+[\]】)）]\s*|^[①②③④⑤⑥⑦⑧⑨⑩]\s*)/, '');
   // 去掉 Markdown 标题符号
   cleaned = cleaned.replace(/^#{1,3}\s*/, '');
   // 去掉加粗标记

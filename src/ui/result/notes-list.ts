@@ -11,6 +11,7 @@
  */
 
 import { ResultViewModel, FilterMode } from '../result-view-model';
+import { AtomicNote } from '../../utils/notes-standards';
 
 export interface NotesListElements {
   /** 整个笔记列表容器元素 */
@@ -31,7 +32,7 @@ export interface NotesListElements {
 export function renderNotesList(
   vm: ResultViewModel,
   container: HTMLElement,
-  onSave: (notes: any[]) => Promise<void>,
+  onSave: (notes: AtomicNote[]) => Promise<void>,
   onClose: () => void,
 ): NotesListElements {
   const notesEl = container.createEl('div');
@@ -127,7 +128,7 @@ export function renderNotesList(
 function renderActions(
   vm: ResultViewModel,
   container: HTMLElement,
-  onSave: (notes: any[]) => Promise<void>,
+  onSave: (notes: AtomicNote[]) => Promise<void>,
   onClose: () => void,
   notesListEl: HTMLElement,
 ): void {
@@ -272,9 +273,9 @@ function renderNoteCard(vm: ResultViewModel, container: HTMLElement, i: number):
 }
 
 /** 可展开预览 */
-function renderExpandablePreview(card: HTMLElement, note: any): void {
-  let isLong = note.content.length > 200;
-  let previewText = isLong ? note.content.slice(0, 200) + '...' : note.content;
+function renderExpandablePreview(card: HTMLElement, note: AtomicNote): void {
+  const isLong = note.content.length > 200;
+  const previewText = isLong ? note.content.slice(0, 200) + '...' : note.content;
   const previewEl = card.createEl('div', { cls: 'atomic-notes-card-preview', text: previewText });
   let expandHint: HTMLElement | null = null;
   if (isLong) {
@@ -296,7 +297,7 @@ function renderExpandablePreview(card: HTMLElement, note: any): void {
 }
 
 /** 核查详情（可折叠） */
-function renderVerificationDetail(card: HTMLElement, note: any): void {
+function renderVerificationDetail(card: HTMLElement, note: AtomicNote): void {
   if (!note.verification || note.verification.length === 0) return;
 
   const verifySection = card.createEl('div', { attr: { style: 'margin-top:6px' } });
@@ -354,7 +355,7 @@ function renderVerificationDetail(card: HTMLElement, note: any): void {
 }
 
 /** 标签或综合判断 */
-function renderCardFooter(card: HTMLElement, vm: ResultViewModel, note: any, i: number): void {
+function renderCardFooter(card: HTMLElement, vm: ResultViewModel, note: AtomicNote, i: number): void {
   if (note.tags && note.tags.length > 0) {
     const footer = card.createEl('div', { cls: 'atomic-notes-card-footer' });
     for (const tag of note.tags) {
@@ -371,7 +372,7 @@ function renderCardFooter(card: HTMLElement, vm: ResultViewModel, note: any, i: 
 }
 
 /** 编辑按钮 + 编辑面板 */
-function renderEditSection(card: HTMLElement, vm: ResultViewModel, note: any, i: number): void {
+function renderEditSection(card: HTMLElement, vm: ResultViewModel, note: AtomicNote, i: number): void {
   const editSection = card.createEl('div', { attr: { style: 'margin-top:8px' } });
   const editBtn = editSection.createEl('button', {
     text: '✎ 编辑',
@@ -397,7 +398,7 @@ function renderEditSection(card: HTMLElement, vm: ResultViewModel, note: any, i:
 }
 
 /** 编辑面板 */
-function renderEditPanel(editPanel: HTMLElement, card: HTMLElement, vm: ResultViewModel, note: any, i: number): void {
+function renderEditPanel(editPanel: HTMLElement, card: HTMLElement, vm: ResultViewModel, note: AtomicNote, i: number): void {
   editPanel.empty();
   editPanel.createEl('label', { text: '标题', attr: { style: 'font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px' } });
   const titleInput = editPanel.createEl('input', {

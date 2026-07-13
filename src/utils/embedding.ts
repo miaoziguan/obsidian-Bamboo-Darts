@@ -16,6 +16,14 @@
 import { requestUrl } from 'obsidian';
 import { HUNYUAN_EMBEDDING_URL, EMBEDDING_DIM, EMBEDDING_BATCH_SIZE } from '../constants';
 
+// ─── 类型 ───
+
+/** 混元 Embedding API 返回的单个向量项 */
+interface EmbeddingResponseItem {
+  index: number;
+  embedding: number[];
+}
+
 // ─── 常量 ───
 
 /** 缓存版本号（升级格式时递增） */
@@ -109,10 +117,10 @@ async function fetchBatchWithRetry(batch: string[], config: EmbeddingConfig): Pr
     });
 
     if (response.status === 200) {
-      const data = response.json;
+      const data = response.json as { data: EmbeddingResponseItem[] };
       return data.data
-        .sort((a: any, b: any) => a.index - b.index)
-        .map((item: any) => {
+        .sort((a, b) => a.index - b.index)
+        .map((item) => {
           const emb = item.embedding;
           const vec = new Array(EMBEDDING_DIM).fill(0);
           for (let j = 0; j < Math.min(emb.length, EMBEDDING_DIM); j++) {

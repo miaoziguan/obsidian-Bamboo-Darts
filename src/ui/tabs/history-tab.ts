@@ -10,7 +10,7 @@
 
 import { AtomicNotesPlugin } from '../../main';
 import { ExtractionHistoryEntry } from '../../services/history-service';
-import { Modal, Notice } from 'obsidian';
+import { Modal, Notice, App } from 'obsidian';
 
 export class HistoryTab {
   private plugin: AtomicNotesPlugin;
@@ -172,7 +172,7 @@ export class HistoryTab {
       tab: HistoryTab;
       targetEl: HTMLElement;
 
-      constructor(app: any, tab: HistoryTab, targetEl: HTMLElement) {
+      constructor(app: App, tab: HistoryTab, targetEl: HTMLElement) {
         super(app);
         this.tab = tab;
         this.targetEl = targetEl;

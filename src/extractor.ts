@@ -38,7 +38,6 @@ import {
   createProgressTracker,
   ProgressTracker,
 } from './extraction/progress';
-import { fnv1aHash } from './utils/hash';
 import type { ExtractionDeps } from './extraction/deps';
 
 /**

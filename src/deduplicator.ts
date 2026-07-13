@@ -15,22 +15,17 @@
  * 当 token 集合 < DEDUP_MIN_TOKENS 时，不判定为重复。
  */
 
-import { Vault, TFile, DataAdapter } from 'obsidian';
+import { Vault, TFile } from 'obsidian';
 import { AtomicNote } from './utils/notes-standards';
-import { DedupFeatureCache, DedupFeatureEntry, DedupFeatureFolderData } from './dedup/feature-cache';
+import { DedupFeatureEntry } from './dedup/feature-cache';
 import { fnv1aHash } from './utils/hash';
 import {
   DEDUP_BATCH_SIZE,
-  DEDUP_CACHE_TTL,
-  MAX_CACHED_FOLDERS,
   MIN_TOKENS_THRESHOLD,
   CROSS_BATCH_THRESHOLD,
-  IDF_SMOOTH,
   LENGTH_RATIO_THRESHOLD,
   SHORT_NOTE_LENGTH,
   SHORT_NOTE_BOOST_FACTOR,
-  BM25_K1,
-  BM25_B,
   SIMHASH_HAMMING_THRESHOLD,
 } from './constants';
 import { simhash, hammingDistance } from './utils/simhash';

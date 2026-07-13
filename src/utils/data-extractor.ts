@@ -11,10 +11,10 @@ const DATA_PATTERNS: { regex: RegExp; type: string }[] = [
       /\d+(?:\.\d+)?\s*(?:万亿|万|亿|千|百)?(?:美元|欧元|日元|英镑|人民币|元|美元|人|个|年|月|天|小时|kg|km|m|cm|mm)/g,
     type: 'quantity',
   },
-  { regex: /\d{4}[-\/年]\d{1,2}[-\/月]\d{1,2}/g, type: 'date' },
+  { regex: /\d{4}[-/年]\d{1,2}[-/月]\d{1,2}/g, type: 'date' },
   { regex: /\d{4}年\d{1,2}月\d{1,2}日/g, type: 'date' },
   { regex: /\d{1,2}月\d{1,2}日/g, type: 'date' },
-  { regex: /\d{4}[-\/年]\d{1,2}/g, type: 'date' },
+  { regex: /\d{4}[-/年]\d{1,2}/g, type: 'date' },
   { regex: /(?:第[一二三四五六七八九十\d]+|[一二三四五六七八九十]+倍|\d+倍|\d+番)/g, type: 'rank' },
 ];
 
@@ -67,7 +67,7 @@ export function extractVerifiableClaims(content: string): VerifiableClaim[] {
   const claims: VerifiableClaim[] = [];
   const seen = new Set<string>();
 
-  const sentences = content.split(/[。！？\n\.!\?]+/);
+  const sentences = content.split(/[。！？\n.!?]+/);
 
   for (const sentence of sentences) {
     const trimmed = sentence.trim();
@@ -203,7 +203,7 @@ export function locateAnchorInSource(
  * 从原文中提取包含指定位置的完整句子
  */
 function extractContextSentence(content: string, index: number, matchLength: number): string {
-  const sentenceDelimiters = /[。！？\n\.!\?]/;
+  const sentenceDelimiters = /[。！？\n.!?]/;
 
   // 向前找句子开头
   let start = index;

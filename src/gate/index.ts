@@ -16,6 +16,7 @@ import { checkLength } from './length';
 import { checkQuality, checkKeywordStuffing } from './quality';
 import { checkDensity } from './density';
 import { checkNoiseRatio } from './noise';
+import { checkParagraphRepetition } from './paragraph-repetition';
 import { checkHtmlArtifacts } from './html';
 import { checkMojibake } from './mojibake';
 import { checkLinkDump } from './link-dump';
@@ -164,6 +165,18 @@ export function runGateChecks(
     );
     collect(
       { name: '噪声', check: checkNoiseRatio(content, maxNoise, warnNoise) },
+      reasons,
+      warnings,
+    );
+    collect(
+      {
+        name: '段落重复',
+        check: checkParagraphRepetition(
+          content,
+          profileConfig?.gateParagraphRepBlock,
+          profileConfig?.gateParagraphRepWarn,
+        ),
+      },
       reasons,
       warnings,
     );

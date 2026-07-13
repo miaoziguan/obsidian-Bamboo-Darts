@@ -7,10 +7,9 @@
  */
 
 import { AtomicNote } from '../utils/notes-standards';
-import { ExtractionResult, PendingDuplicate } from '../extractor';
-import { DedupResult, DuplicateInfo } from '../deduplicator';
-import { ReviewResult } from '../review/note-reviewer';
-import { PROFILE_LABELS, ContentProfile } from '../extraction/profiles';
+import { ExtractionResult } from '../extractor';
+import { DedupResult } from '../deduplicator';
+import { PROFILE_LABELS } from '../extraction/profiles';
 
 // ─── 类型定义 ───
 

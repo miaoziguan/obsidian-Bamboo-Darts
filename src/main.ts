@@ -5,7 +5,7 @@
  * 提炼编排逻辑已委托给 ExtractionService
  */
 
-import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, Modal, TFile } from 'obsidian';
+import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, TFile } from 'obsidian';
 import { AtomicNotesSettingTab, PluginSettings, DEFAULT_SETTINGS } from './ui/setting-tab';
 import { clearUrlCache } from './extractor';
 import { isPathInFolder, clearDedupCache, getDefaultDedupCache } from './deduplicator';
@@ -250,7 +250,7 @@ export default class AtomicNotesPlugin extends Plugin {
       if (currentVersion < 2) {
         // v1 → v2：清理已废弃字段，升级 maxTokens 默认值
         if ('enableDataCheck' in this.settings) {
-          delete (this.settings as any).enableDataCheck;
+          delete (this.settings as Record<string, unknown>).enableDataCheck;
         }
         if (this.settings.maxTokens === 2000) {
           this.settings.maxTokens = DEFAULT_SETTINGS.maxTokens;
@@ -275,7 +275,7 @@ export default class AtomicNotesPlugin extends Plugin {
           needsReEncrypt = true; // 旧明文 → 需要升级加密
         }
         const decrypted = decryptApiKey(stored);
-        if (decrypted !== null) (this.settings as any)[field] = decrypted;
+        if (decrypted !== null) this.settings[field] = decrypted;
       }
       if (needsReEncrypt) {
         await this.saveSettings();

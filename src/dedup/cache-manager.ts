@@ -254,12 +254,10 @@ export class DedupCacheManager {
     if (this.savePending) return;
     this.savePending = true;
     setTimeout(() => {
-      let succeeded = true;
       this.featureCache
         .save()
         .catch((e) => {
           console.error('[Bamboo Darts] 延迟保存去重缓存失败:', e);
-          succeeded = false;
         })
         .finally(() => {
           // 无论成功失败都重置，避免死锁导致后续持久化被静默丢弃

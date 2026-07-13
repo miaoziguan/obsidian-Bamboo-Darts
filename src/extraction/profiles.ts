@@ -64,6 +64,10 @@ export interface ProfileConfig {
   gateMojibakeBlockCount: number;
   /** Phase 2: 乱码警告阈值（命中个数） */
   gateMojibakeWarnCount: number;
+  /** Phase 2: 段落重复率阻断阈值（最高段落对 Jaccard 相似度） */
+  gateParagraphRepBlock: number;
+  /** Phase 2: 段落重复率警告阈值（最高段落对 Jaccard 相似度） */
+  gateParagraphRepWarn: number;
 }
 
 // ─── 默认策略参数 ───
@@ -102,6 +106,9 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     gateHtmlWarnCount: 2,
     gateMojibakeBlockCount: 3,
     gateMojibakeWarnCount: 1,
+    // 技术文献段落结构重复容忍度更高（代码块、定义常相似）
+    gateParagraphRepBlock: 0.9,
+    gateParagraphRepWarn: 0.75,
   },
   balanced: {
     crossBatchThreshold: 0.65,
@@ -133,6 +140,8 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     gateHtmlWarnCount: 2,
     gateMojibakeBlockCount: 3,
     gateMojibakeWarnCount: 1,
+    gateParagraphRepBlock: 0.85,
+    gateParagraphRepWarn: 0.7,
   },
   sparse: {
     crossBatchThreshold: 0.55,
@@ -166,6 +175,8 @@ export const PROFILE_CONFIGS: Record<ContentProfile, ProfileConfig> = {
     gateHtmlWarnCount: 2,
     gateMojibakeBlockCount: 3,
     gateMojibakeWarnCount: 1,
+    gateParagraphRepBlock: 0.85,
+    gateParagraphRepWarn: 0.7,
   },
 };
 
@@ -258,7 +269,7 @@ function dataDensity(text: string): number {
   }
 
   // 年份和日期：2024年、2025-03、2024/06/15（排除更长数字的子串）
-  for (const m of text.matchAll(/(?<!\d)\d{4}(?:[-\/年]\d{1,2}(?:[-\/月]\d{1,2})?)?(?!\d)/g)) {
+  for (const m of text.matchAll(/(?<!\d)\d{4}(?:[-/年]\d{1,2}(?:[-/月]\d{1,2})?)?(?!\d)/g)) {
     const year = parseInt(m[0]);
     if (year >= 1900 && year <= 2100 && !seen.has(m[0])) {
       seen.add(m[0]);

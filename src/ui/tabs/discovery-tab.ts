@@ -1,4 +1,5 @@
 import { AtomicNotesPlugin } from '../../main';
+import { TFile } from 'obsidian';
 import { buildSimilarityMatrix, mmrRerank, NoteMeta, SimilarityIndex, invalidateDiscoveryCache } from '../../discovery/similarity-matrix';
 
 /**
@@ -82,7 +83,7 @@ export class DiscoveryTab {
     if (noteMetas.length === 0) {
       const allFiles = app.vault.getMarkdownFiles();
       const files = settings.targetFolder
-        ? allFiles.filter((f: any) => f.path.startsWith(settings.targetFolder))
+        ? allFiles.filter((f: TFile) => f.path.startsWith(settings.targetFolder))
         : allFiles;
 
       for (const file of files) {

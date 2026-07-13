@@ -3,7 +3,6 @@
  * 从 deduplicator.ts 拆分，职责单一：语料库统计 + 向量计算
  */
 
-import { tokenize } from '../tokenizer';
 import {
   IDF_SMOOTH,
   MIN_TOKENS_THRESHOLD,

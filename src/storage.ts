@@ -70,7 +70,7 @@ export function escapeYamlValue(value: string): string {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r')}"`;
   }
   // 如果值包含 YAML 特殊字符，用双引号包裹并转义内部引号
-  if (/[:\[\]{}#&*!|>'"%@`,?\\]/.test(value)) {
+  if (/[:[\]{}#&*!|>'"%@`,?\\]/.test(value)) {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
   return value;
