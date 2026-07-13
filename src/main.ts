@@ -5,7 +5,7 @@
  * 提炼编排逻辑已委托给 ExtractionService
  */
 
-import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, TFile } from 'obsidian';
+import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, TFile, Platform } from 'obsidian';
 import { AtomicNotesSettingTab, PluginSettings, DEFAULT_SETTINGS } from './ui/setting-tab';
 import { clearUrlCache } from './extractor';
 import { isPathInFolder, clearDedupCache, getDefaultDedupCache } from './deduplicator';
@@ -172,27 +172,36 @@ export default class AtomicNotesPlugin extends Plugin {
       },
     });
 
-    // 添加命令：切换面板位置
-    this.addCommand({
-      id: 'open-panel-left',
-      name: '打开面板 - 左侧栏',
-      callback: () => this.openPanelAt('left'),
-    });
-    this.addCommand({
-      id: 'open-panel-right',
-      name: '打开面板 - 右侧栏',
-      callback: () => this.openPanelAt('right'),
-    });
-    this.addCommand({
-      id: 'open-panel-tab',
-      name: '打开面板 - 新标签页',
-      callback: () => this.openPanelAt('tab'),
-    });
-    this.addCommand({
-      id: 'open-panel-split',
-      name: '打开面板 - 分屏',
-      callback: () => this.openPanelAt('split'),
-    });
+    // 添加命令：打开面板
+    // 移动端无侧栏/分屏概念，仅注册「新标签页」形式；桌面端提供完整位置命令
+    if (Platform.isMobile) {
+      this.addCommand({
+        id: 'open-panel-tab',
+        name: '打开面板',
+        callback: () => this.openPanelAt('tab'),
+      });
+    } else {
+      this.addCommand({
+        id: 'open-panel-left',
+        name: '打开面板 - 左侧栏',
+        callback: () => this.openPanelAt('left'),
+      });
+      this.addCommand({
+        id: 'open-panel-right',
+        name: '打开面板 - 右侧栏',
+        callback: () => this.openPanelAt('right'),
+      });
+      this.addCommand({
+        id: 'open-panel-tab',
+        name: '打开面板 - 新标签页',
+        callback: () => this.openPanelAt('tab'),
+      });
+      this.addCommand({
+        id: 'open-panel-split',
+        name: '打开面板 - 分屏',
+        callback: () => this.openPanelAt('split'),
+      });
+    }
 
     // 添加 ribbon 图标（有选中文本→提炼，无选中文本→打开面板）
     this.addRibbonIcon('atom', '提炼原子笔记', () => {
