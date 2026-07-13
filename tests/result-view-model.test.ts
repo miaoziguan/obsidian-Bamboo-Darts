@@ -8,6 +8,7 @@ import { DedupResult, DuplicateInfo } from '../src/deduplicator';
 
 function makeNote(overrides: Partial<AtomicNote> = {}): AtomicNote {
   return {
+    id: 'note-0',
     title: '测试笔记',
     content: '这是一段测试内容',
     tags: [],
@@ -19,7 +20,11 @@ function makeNote(overrides: Partial<AtomicNote> = {}): AtomicNote {
 function makeResult(overrides: Partial<ExtractionResult> = {}): ExtractionResult {
   return {
     success: true,
-    notes: [makeNote(), makeNote({ title: '笔记2' }), makeNote({ title: '笔记3' })],
+    notes: [
+      makeNote({ id: 'note-0' }),
+      makeNote({ id: 'note-1', title: '笔记2' }),
+      makeNote({ id: 'note-2', title: '笔记3' }),
+    ],
     steps: [{ step: 'test', status: 'success', message: 'ok', durationMs: 10 }],
     ...overrides,
   };
@@ -30,7 +35,7 @@ function makePending(overrides: Partial<PendingDuplicate> = {}): PendingDuplicat
     similarity: 0.7,
     matchedNote: '已有笔记',
     matchedContent: '已有内容',
-    newNoteIndex: 0,
+    noteId: 'pending-0',
     newNoteTitle: '新笔记',
     newNoteContent: '新内容',
     ...overrides,
@@ -65,9 +70,9 @@ describe('ResultViewModel', () => {
   describe('初始化', () => {
     it('默认全选所有笔记', () => {
       expect(vm.selectedNotes.size).toBe(3);
-      expect(vm.selectedNotes.has(0)).toBe(true);
-      expect(vm.selectedNotes.has(1)).toBe(true);
-      expect(vm.selectedNotes.has(2)).toBe(true);
+      expect(vm.selectedNotes.has('note-0')).toBe(true);
+      expect(vm.selectedNotes.has('note-1')).toBe(true);
+      expect(vm.selectedNotes.has('note-2')).toBe(true);
     });
 
     it('totalNotes 返回笔记总数', () => {
@@ -143,12 +148,12 @@ describe('ResultViewModel', () => {
     });
 
     it('toggleSelection 切换单个', () => {
-      vm.toggleSelection(0);
-      expect(vm.selectedNotes.has(0)).toBe(false);
+      vm.toggleSelection('note-0');
+      expect(vm.selectedNotes.has('note-0')).toBe(false);
       expect(vm.selectedCount).toBe(2);
 
-      vm.toggleSelection(0);
-      expect(vm.selectedNotes.has(0)).toBe(true);
+      vm.toggleSelection('note-0');
+      expect(vm.selectedNotes.has('note-0')).toBe(true);
       expect(vm.selectedCount).toBe(3);
     });
 
@@ -158,7 +163,7 @@ describe('ResultViewModel', () => {
     });
 
     it('toggleAll 非全选时全选', () => {
-      vm.toggleSelection(0);
+      vm.toggleSelection('note-0');
       vm.toggleAll();
       expect(vm.allSelected).toBe(true);
     });
@@ -168,7 +173,7 @@ describe('ResultViewModel', () => {
       vm.onChange = (e) => events.push(e.type);
       vm.selectAll();
       vm.deselectAll();
-      vm.toggleSelection(0);
+      vm.toggleSelection('note-0');
       vm.toggleAll();
       expect(events).toEqual([
         'selection-changed',
@@ -379,8 +384,9 @@ describe('ResultViewModel', () => {
 
     it('恢复后自动选中并记录', () => {
       result.crossBatchDuplicates = [makeDup()];
+      const before = vm.selectedNotes.size;
       vm.restoreCrossBatchNote(0);
-      expect(vm.selectedNotes.has(3)).toBe(true);
+      expect(vm.selectedNotes.size).toBe(before + 1);
       expect(vm.restoredCrossBatch.has(0)).toBe(true);
     });
 
@@ -476,44 +482,44 @@ describe('ResultViewModel', () => {
   describe('待确认操作', () => {
     beforeEach(() => {
       result.vaultDedupPending = [
-        makePending({ newNoteIndex: 0 }),
-        makePending({ newNoteIndex: 1, highSimilarity: true }),
-        makePending({ newNoteIndex: 2 }),
+        makePending({ noteId: 'pending-0' }),
+        makePending({ noteId: 'pending-1', highSimilarity: true }),
+        makePending({ noteId: 'pending-2' }),
       ];
       vm = new ResultViewModel(result);
     });
 
     it('keepPendingNote 添加选中', () => {
       vm.deselectAll();
-      vm.keepPendingNote(1);
-      expect(vm.selectedNotes.has(1)).toBe(true);
+      vm.keepPendingNote('pending-1');
+      expect(vm.selectedNotes.has('pending-1')).toBe(true);
     });
 
     it('discardPendingNote 移除选中', () => {
-      vm.discardPendingNote(0);
-      expect(vm.selectedNotes.has(0)).toBe(false);
+      vm.discardPendingNote('pending-0');
+      expect(vm.selectedNotes.has('pending-0')).toBe(false);
     });
 
     it('keepAllPending 全选待确认', () => {
       vm.deselectAll();
       vm.keepAllPending();
-      expect(vm.selectedNotes.has(0)).toBe(true);
-      expect(vm.selectedNotes.has(1)).toBe(true);
-      expect(vm.selectedNotes.has(2)).toBe(true);
+      expect(vm.selectedNotes.has('pending-0')).toBe(true);
+      expect(vm.selectedNotes.has('pending-1')).toBe(true);
+      expect(vm.selectedNotes.has('pending-2')).toBe(true);
     });
 
     it('discardAllPending 全丢弃待确认', () => {
       vm.discardAllPending();
-      expect(vm.selectedNotes.has(0)).toBe(false);
-      expect(vm.selectedNotes.has(1)).toBe(false);
-      expect(vm.selectedNotes.has(2)).toBe(false);
+      expect(vm.selectedNotes.has('pending-0')).toBe(false);
+      expect(vm.selectedNotes.has('pending-1')).toBe(false);
+      expect(vm.selectedNotes.has('pending-2')).toBe(false);
     });
 
     it('待确认操作触发 pending-changed 事件', () => {
       const events: string[] = [];
       vm.onChange = (e) => events.push(e.type);
-      vm.keepPendingNote(0);
-      vm.discardPendingNote(1);
+      vm.keepPendingNote('pending-0');
+      vm.discardPendingNote('pending-1');
       vm.keepAllPending();
       vm.discardAllPending();
       expect(events).toEqual([
@@ -531,12 +537,12 @@ describe('ResultViewModel', () => {
       // 不抛异常即通过
     });
 
-    it('getSelectedNotes 仅返回被选中的 pending', () => {
+    it('getSelectedNotes 按 noteId 精确返回选中笔记', () => {
       vm.deselectAll();
-      vm.keepPendingNote(1);
+      // toggleSelection 用 note.id；makeResult 的笔记 id 为 note-0/note-1/note-2
+      vm.toggleSelection('note-1');
       const selected = vm.getSelectedNotes();
       expect(selected.length).toBe(1);
-      // selectedNotes 用 note 数组下标，keepPendingNote(1) 选中 notes[1]
       expect(selected[0].title).toBe('笔记2');
     });
   });
@@ -585,7 +591,7 @@ describe('ResultViewModel', () => {
 
   describe('getSelectedNotes', () => {
     it('返回选中的笔记子集', () => {
-      vm.toggleSelection(1); // 取消选中 1
+      vm.toggleSelection('note-1'); // 取消选中 note-1
       const selected = vm.getSelectedNotes();
       expect(selected.length).toBe(2);
       expect(selected[0].title).toBe('测试笔记');

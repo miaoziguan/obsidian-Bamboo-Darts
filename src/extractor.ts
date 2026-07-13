@@ -62,12 +62,9 @@ function remapPendingDuplicates(
   notes: AtomicNote[],
   pending: PendingDuplicate[],
 ): PendingDuplicate[] {
-  const idToIndex = new Map<string, number>();
-  notes.forEach((note, idx) => idToIndex.set(note.id, idx));
-
-  return pending
-    .filter((p) => idToIndex.has(p.noteId))
-    .map((p) => ({ ...p, newNoteIndex: idToIndex.get(p.noteId)! }));
+  const ids = new Set(notes.map((n) => n.id));
+  // noteId 是唯一引用，过滤掉因笔记过滤而不再存在的 pending 即可
+  return pending.filter((p) => ids.has(p.noteId));
 }
 
 /** 取消检查：若已取消，标记 tracker 并返回结果；否则返回 null */
@@ -158,7 +155,6 @@ async function runVaultDedupPhase(
         similarity: info.bestMatch.similarity,
         matchedNote: info.bestMatch.path,
         matchedContent: info.bestMatch.content,
-        newNoteIndex: info.noteIndex,
         noteId: info.note.id,
         newNoteTitle: info.note.title,
         newNoteContent: info.note.content,
@@ -173,7 +169,6 @@ async function runVaultDedupPhase(
         similarity: info.bestMatch.similarity,
         matchedNote: info.bestMatch.path,
         matchedContent: info.bestMatch.content,
-        newNoteIndex: info.noteIndex,
         noteId: info.note.id,
         newNoteTitle: info.note.title,
         newNoteContent: info.note.content,
@@ -637,7 +632,7 @@ export interface ExtractionResult {
   vaultDedupPending?: PendingDuplicate[];
   // 疑似重复提示（中相似度），供 main.ts 判断是否走"确认后保存"流程
   duplicateHints?: {
-    noteIndex: number;
+    noteId: string;
     similarity: number;
     matchedNote: string;
     matchedContent: string;
@@ -653,9 +648,7 @@ export interface PendingDuplicate {
   similarity: number;
   matchedNote: string;
   matchedContent: string;
-  /** @deprecated 使用 noteId 替代数组下标引用，newNoteIndex 保留向后兼容 */
-  newNoteIndex: number;
-  /** 笔记唯一 ID，用于跨阶段精确引用（替代 newNoteIndex） */
+  /** 笔记唯一 ID，用于跨阶段精确引用 */
   noteId: string;
   newNoteTitle: string;
   newNoteContent: string;
@@ -965,7 +958,7 @@ async function runExtractionPhases(
   const duplicateHints =
     vaultDedupPending.length > 0
       ? vaultDedupPending.map((p) => ({
-          noteIndex: p.newNoteIndex,
+          noteId: p.noteId,
           similarity: p.similarity,
           matchedNote: p.matchedNote,
           matchedContent: p.matchedContent,

@@ -309,14 +309,14 @@ export class ResultModal extends Modal {
         attr: { style: 'font-size:12px;padding:4px 12px;cursor:pointer' },
       });
       keepBtn.addEventListener('click', () => {
-        this.vm.keepPendingNote(item.newNoteIndex);
+        this.vm.keepPendingNote(item.noteId);
         card.style.opacity = '0.5';
         keepBtn.setText('已保留');
         keepBtn.setAttribute('disabled', 'true');
         discardBtn.setAttribute('disabled', 'true');
       });
       discardBtn.addEventListener('click', () => {
-        this.vm.discardPendingNote(item.newNoteIndex);
+        this.vm.discardPendingNote(item.noteId);
         card.style.opacity = '0.5';
         discardBtn.setText('已丢弃');
         discardBtn.setAttribute('disabled', 'true');

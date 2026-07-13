@@ -62,8 +62,8 @@ export class ResultViewModel {
   readonly result: ExtractionResult;
   readonly dedupResult?: DedupResult;
 
-  /** 选中的笔记索引 */
-  selectedNotes: Set<number>;
+  /** 选中的笔记 ID 集合（用 note.id 引用，避免数组下标漂移） */
+  selectedNotes: Set<string>;
 
   /** 已恢复的批内去重索引 */
   restoredCrossBatch: Set<number> = new Set();
@@ -83,7 +83,7 @@ export class ResultViewModel {
 
     // 默认全选
     const notes = result.notes || [];
-    this.selectedNotes = new Set(notes.map((_, i) => i));
+    this.selectedNotes = new Set(notes.map((n) => n.id));
   }
 
   // ─── 只读 getter ───
@@ -196,7 +196,7 @@ export class ResultViewModel {
   // ─── 状态变更方法 ───
 
   selectAll(): void {
-    this.selectedNotes = new Set(this.notes.map((_, i) => i));
+    this.selectedNotes = new Set(this.notes.map((n) => n.id));
     this.onChange?.({ type: 'selection-changed' });
   }
 
@@ -205,11 +205,11 @@ export class ResultViewModel {
     this.onChange?.({ type: 'selection-changed' });
   }
 
-  toggleSelection(i: number): void {
-    if (this.selectedNotes.has(i)) {
-      this.selectedNotes.delete(i);
+  toggleSelection(id: string): void {
+    if (this.selectedNotes.has(id)) {
+      this.selectedNotes.delete(id);
     } else {
-      this.selectedNotes.add(i);
+      this.selectedNotes.add(id);
     }
     this.onChange?.({ type: 'selection-changed' });
   }
@@ -246,7 +246,7 @@ export class ResultViewModel {
     };
     const newIndex = this.result.notes.length;
     this.result.notes.push(note);
-    this.selectedNotes.add(newIndex);
+    this.selectedNotes.add(note.id);
     this.restoredCrossBatch.add(dupIndex);
     this.onChange?.({ type: 'note-restored', index: newIndex });
     return { note, newIndex };
@@ -278,14 +278,14 @@ export class ResultViewModel {
   }
 
   /** 保留疑似重复笔记 */
-  keepPendingNote(noteIndex: number): void {
-    this.selectedNotes.add(noteIndex);
+  keepPendingNote(noteId: string): void {
+    this.selectedNotes.add(noteId);
     this.onChange?.({ type: 'pending-changed' });
   }
 
   /** 丢弃疑似重复笔记 */
-  discardPendingNote(noteIndex: number): void {
-    this.selectedNotes.delete(noteIndex);
+  discardPendingNote(noteId: string): void {
+    this.selectedNotes.delete(noteId);
     this.onChange?.({ type: 'pending-changed' });
   }
 
@@ -294,7 +294,7 @@ export class ResultViewModel {
     const pending = this.result.vaultDedupPending;
     if (!pending) return;
     for (const item of pending) {
-      this.selectedNotes.add(item.newNoteIndex);
+      this.selectedNotes.add(item.noteId);
     }
     this.onChange?.({ type: 'pending-changed' });
   }
@@ -304,14 +304,14 @@ export class ResultViewModel {
     const pending = this.result.vaultDedupPending;
     if (!pending) return;
     for (const item of pending) {
-      this.selectedNotes.delete(item.newNoteIndex);
+      this.selectedNotes.delete(item.noteId);
     }
     this.onChange?.({ type: 'pending-changed' });
   }
 
   /** 获取选中的笔记子集 */
   getSelectedNotes(): AtomicNote[] {
-    return this.notes.filter((_, i) => this.selectedNotes.has(i));
+    return this.notes.filter((n) => this.selectedNotes.has(n.id));
   }
 
   /** 释放引用 */
