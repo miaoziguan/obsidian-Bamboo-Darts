@@ -530,6 +530,15 @@ describe('ResultViewModel', () => {
       noVm.discardAllPending();
       // 不抛异常即通过
     });
+
+    it('getSelectedNotes 仅返回被选中的 pending', () => {
+      vm.deselectAll();
+      vm.keepPendingNote(1);
+      const selected = vm.getSelectedNotes();
+      expect(selected.length).toBe(1);
+      // selectedNotes 用 note 数组下标，keepPendingNote(1) 选中 notes[1]
+      expect(selected[0].title).toBe('笔记2');
+    });
   });
 
   // ── pendingStats ──

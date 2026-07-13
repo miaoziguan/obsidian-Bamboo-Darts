@@ -13,8 +13,17 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: [
         'src/main.ts',
-        'src/ui/**',
         'src/types.ts',
+        // UI 层：仅放开已充分单测的 result-view-model.ts，其余暂不计入覆盖率
+        'src/ui/setting-tab.ts',
+        'src/ui/panel-view.ts',
+        'src/ui/result-modal.ts',
+        'src/ui/input-modal.ts',
+        'src/ui/aux-modals.ts',
+        'src/ui/progress-modal.ts',
+        'src/ui/about-content.ts',
+        'src/ui/tabs/**',
+        'src/ui/result/**',
       ],
       thresholds: {
         lines: 82,
