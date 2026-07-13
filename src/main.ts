@@ -32,6 +32,7 @@ import {
 } from './services/extraction-service';
 import { CancellationError } from './errors';
 import { encryptApiKey, decryptApiKey } from './utils/crypto-store';
+import { shouldShowOnboarding, markOnboarded } from './onboarding';
 
 /** 友好化常见的 API 错误信息 */
 function friendlyError(error: unknown): string {
@@ -223,6 +224,17 @@ export default class AtomicNotesPlugin extends Plugin {
       }),
     );
 
+    // 首次启动引导：弹欢迎 Notice 并打开设置页填 API Key
+    if (shouldShowOnboarding(this.settings)) {
+      new Notice(
+        '欢迎使用竹叶飞刃！先到设置填写 DeepSeek API Key，即可开始提炼原子笔记。其余参数已默认，开箱即用。',
+        10000,
+      );
+      this.openSettingTab();
+      this.settings = markOnboarded(this.settings) as PluginSettings;
+      await this.saveSettings();
+    }
+
     console.log('Bamboo Darts 插件加载完成');
   }
 
@@ -243,6 +255,11 @@ export default class AtomicNotesPlugin extends Plugin {
     try {
       const data = await this.loadData();
       this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+
+      // 向后兼容：已有旧数据的老用户不应再弹首启引导
+      if (data && this.settings.firstRun) {
+        this.settings.firstRun = false;
+      }
 
       // 按版本号执行迁移
       const currentVersion = this.settings.settingsVersion || 1;

@@ -26,6 +26,9 @@ export interface PluginSettings {
   // 设置版本号（用于迁移）
   settingsVersion: number;
 
+  // Onboarding：首次启动引导标记，引导完成后置 false
+  firstRun: boolean;
+
   // DeepSeek API
   deepseekApiKey: string;
   deepseekApiUrl: string;
@@ -98,6 +101,7 @@ export interface PluginSettings {
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   settingsVersion: 3,
+  firstRun: true,
   deepseekApiKey: '',
   deepseekApiUrl: 'https://api.deepseek.com/v1/chat/completions',
   model: 'deepseek-v4-flash',
@@ -187,6 +191,10 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
 
   private buildApiSection(containerEl: HTMLElement): void {
     containerEl.createEl('h3', { text: 'API 配置' });
+    containerEl.createEl('p', {
+      text: '零配置开箱即用：除 API Key 外，模型、温度、嵌入等参数均已设好默认值。填完 Key 直接选中文本右键「提炼原子笔记」即可。',
+      cls: 'atomic-notes-hint',
+    });
 
     new Setting(containerEl)
       .setName('API Key')
