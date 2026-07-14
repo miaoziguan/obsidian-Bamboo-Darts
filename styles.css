@@ -546,8 +546,8 @@
 
 /* 移动端最小可用适配（不重做布局，仅保证不溢出、可点） */
 @media (max-width: 768px) {
-  .atomic-notes-modal textarea,
-  .atomic-notes-modal input[type='text'],
+  .modal textarea,
+  .modal input[type='text'],
   .setting-item input[type='text'],
   .setting-item textarea {
     width: 100%;
