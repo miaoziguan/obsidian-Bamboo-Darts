@@ -239,7 +239,7 @@ export default class AtomicNotesPlugin extends Plugin {
         '欢迎使用竹叶飞刃！先到设置填写 DeepSeek API Key，即可开始提炼原子笔记。其余参数已默认，开箱即用。',
         10000,
       );
-      this.openSettingTab();
+      this.app.setting.openTabById('atomic-notes-extractor');
       this.settings = markOnboarded(this.settings) as PluginSettings;
       await this.saveSettings();
     }
