@@ -265,8 +265,10 @@ export default class AtomicNotesPlugin extends Plugin {
       const data = await this.loadData();
       this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 
-      // 向后兼容：已有旧数据的老用户不应再弹首启引导
-      if (data && this.settings.firstRun) {
+      // 向后兼容：已有任意已保存数据的老用户不应再弹首启引导
+      // 注意：不能只判断 firstRun 字段，因为旧数据可能根本没有该字段（undefined），
+      // Object.assign 会被 DEFAULT_SETTINGS.firstRun=true 覆盖，导致老用户误弹
+      if (data) {
         this.settings.firstRun = false;
       }
 

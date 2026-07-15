@@ -380,6 +380,10 @@ describe('ResultViewModel', () => {
       expect(restoreResult!.newIndex).toBe(3);
       expect(restoreResult!.note.title).toBe('被删笔记');
       expect(result.notes!.length).toBe(4);
+      // 恢复的笔记必须有唯一 id，否则 selectedNotes(Set<string>) 会混入 undefined
+      expect(typeof restoreResult!.note.id).toBe('string');
+      expect(restoreResult!.note.id.length).toBeGreaterThan(0);
+      expect(vm.selectedNotes.has(restoreResult!.note.id)).toBe(true);
     });
 
     it('恢复后自动选中并记录', () => {

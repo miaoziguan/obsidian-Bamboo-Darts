@@ -6,7 +6,7 @@
  * 可独立单元测试。
  */
 
-import { AtomicNote } from '../utils/notes-standards';
+import { AtomicNote, genNoteId } from '../utils/notes-standards';
 import { ExtractionResult } from '../extractor';
 import { DedupResult } from '../deduplicator';
 import { PROFILE_LABELS } from '../extraction/profiles';
@@ -239,6 +239,7 @@ export class ResultViewModel {
     if (!dup) return null;
 
     const note: AtomicNote = {
+      id: genNoteId(),
       title: dup.removedTitle,
       content: dup.removedContent,
       tags: [],
