@@ -4,12 +4,13 @@
    Panel View（侧边栏面板）
    ───────────────────────────────────────────── */
 
-.atomic-notes-panel {
+/* 提高特异性（.view-content.atomic-notes-panel，0,2,0）以覆盖主题对
+   .view-content 的默认 padding，避免使用 !important。 */
+.view-content.atomic-notes-panel {
   /* 左右留白由设置页「版面左右留白」滑块控制（--atomic-notes-panel-padding），
      四个 tab（输入/历史/发现/介绍）统一跟随该变量，默认 56px。
-     兜底值 56px 防止变量缺失时贴边。
-     用 !important 确保覆盖主题对 .view-content 的默认 padding。 */
-  padding: 0 var(--atomic-notes-panel-padding, 56px) 16px !important;
+     兜底值 56px 防止变量缺失时贴边。 */
+  padding: 0 var(--atomic-notes-panel-padding, 56px) 16px;
   max-width: 640px;
   margin: 0 auto;
   box-sizing: border-box;
