@@ -454,4 +454,14 @@ export const EMBEDDING_DIM = 1024;
 /** 单次 embedding API 最大 batch 大小 */
 export const EMBEDDING_BATCH_SIZE = 16;
 
+// ─── 面板版面留白（用户可调）───
+/** 左右留白最小像素（0 = 贴边） */
+export const PANEL_PADDING_MIN = 0;
+/** 左右留白最大像素 */
+export const PANEL_PADDING_MAX = 72;
+/** 滑块步长（对齐 4pt 网格） */
+export const PANEL_PADDING_STEP = 4;
+/** 默认左右留白像素（窄侧边栏下也有呼吸感） */
+export const PANEL_PADDING_DEFAULT = 56;
+
 // ─── 发现 Tab 常量 ───

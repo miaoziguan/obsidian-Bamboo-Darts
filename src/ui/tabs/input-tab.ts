@@ -58,22 +58,14 @@ export class InputTab {
 
     // ── URL / 文本 子切换 ──
 
-    const subToggleBar = panel.createEl('div', {
-      attr: { style: 'display:flex;gap:12px;margin-bottom:10px;padding:4px 0' },
-    });
+    const subToggleBar = panel.createEl('div', { cls: 'atomic-notes-subtoggle-bar' });
     const urlModeBtn = subToggleBar.createEl('span', {
       text: 'URL',
-      attr: {
-        style:
-          'font-size:12px;font-weight:600;color:var(--text-accent);cursor:pointer;padding:2px 0;border-bottom:2px solid var(--text-accent)',
-      },
+      cls: 'atomic-notes-subtoggle-btn',
     });
     const textModeBtn = subToggleBar.createEl('span', {
       text: '文本',
-      attr: {
-        style:
-          'font-size:12px;color:var(--text-muted);cursor:pointer;padding:2px 0;border-bottom:2px solid transparent',
-      },
+      cls: 'atomic-notes-subtoggle-btn',
     });
 
     // ── textarea（文本模式）──
@@ -130,9 +122,7 @@ export class InputTab {
       cls: 'atomic-notes-char-count',
       text: '0 字',
     });
-    const pasteActions = pasteMeta.createEl('div', {
-      attr: { style: 'display:flex;gap:8px;align-items:center' },
-    });
+    const pasteActions = pasteMeta.createEl('div', { cls: 'atomic-notes-meta-actions' });
     const readClipBtn = pasteActions.createEl('a', {
       cls: 'atomic-notes-clip-btn',
       text: '读取剪贴板',
@@ -154,9 +144,7 @@ export class InputTab {
 
     const urlMeta = panel.createEl('div', { cls: 'atomic-notes-meta-row' });
     urlMeta.style.display = 'none';
-    const urlMetaActions = urlMeta.createEl('div', {
-      attr: { style: 'display:flex;gap:8px;align-items:center' },
-    });
+    const urlMetaActions = urlMeta.createEl('div', { cls: 'atomic-notes-meta-actions' });
     const pasteUrlBtn = urlMetaActions.createEl('a', {
       cls: 'atomic-notes-clip-btn',
       text: '粘贴剪贴板URL',
@@ -180,10 +168,8 @@ export class InputTab {
       pasteMeta.style.display = isText ? '' : 'none';
       urlInput.style.display = isText ? 'none' : '';
       urlMeta.style.display = isText ? 'none' : '';
-      textModeBtn.style.color = isText ? 'var(--text-accent)' : 'var(--text-muted)';
-      textModeBtn.style.borderBottomColor = isText ? 'var(--text-accent)' : 'transparent';
-      urlModeBtn.style.color = isText ? 'var(--text-muted)' : 'var(--text-accent)';
-      urlModeBtn.style.borderBottomColor = isText ? 'transparent' : 'var(--text-accent)';
+      textModeBtn.toggleClass('is-active', isText);
+      urlModeBtn.toggleClass('is-active', !isText);
     };
 
     textModeBtn.addEventListener('click', () => setInputSubMode('text'));
@@ -271,14 +257,11 @@ export class InputTab {
     wrap.empty();
     this._progressWrap = wrap;
     this._progressTitle = wrap.createEl('div', {
-      attr: { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' },
+      cls: 'atomic-notes-progress-title',
       text: '准备提炼...',
     });
     this._progressBody = wrap.createEl('div', {
-      attr: {
-        style:
-          'font-size:12px;color:var(--text-muted);line-height:1.8;max-height:240px;overflow-y:auto;',
-      },
+      cls: 'atomic-notes-progress-body',
     });
   }
 

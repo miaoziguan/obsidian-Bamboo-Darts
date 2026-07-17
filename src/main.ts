@@ -204,7 +204,7 @@ export default class AtomicNotesPlugin extends Plugin {
     }
 
     // 添加 ribbon 图标（有选中文本→提炼，无选中文本→打开面板）
-    this.addRibbonIcon('atom', '提炼原子笔记', () => {
+    this.addRibbonIcon('leaf', '提炼原子笔记', () => {
       const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
       if (activeView) {
         const selection = activeView.editor.getSelection();

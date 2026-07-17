@@ -19,7 +19,12 @@ import {
   SEMANTIC_THRESHOLD_MAX,
   SEMANTIC_THRESHOLD_STEP,
   INPUT_TRUNCATE_LENGTH,
+  PANEL_PADDING_MIN,
+  PANEL_PADDING_MAX,
+  PANEL_PADDING_STEP,
+  PANEL_PADDING_DEFAULT,
 } from '../constants';
+import { VIEW_TYPE_ATOMIC_PANEL } from './panel-view';
 import { invalidateDiscoveryCache } from '../discovery/similarity-matrix';
 
 export interface PluginSettings {
@@ -77,6 +82,8 @@ export interface PluginSettings {
 
   // Panel
   panelPosition: 'left' | 'right' | 'tab' | 'split';
+  /** 面板内容距左右边缘的留白（像素），用户可在设置中拖动调节 */
+  panelPadding: number;
 
   // Profile 过滤策略
   autoClassify: boolean;
@@ -130,6 +137,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
   // Panel
   panelPosition: 'right',
+  panelPadding: PANEL_PADDING_DEFAULT,
 
   // Profile 过滤策略
   autoClassify: true,
@@ -929,6 +937,35 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
             new Notice('面板位置已更新，重新打开插件面板即可生效');
           }),
       );
+
+    new Setting(containerEl)
+      .setName('版面左右留白')
+      .setDesc(
+        '调整面板内容距左右边缘的距离（像素）。值越大呼吸感越强，0 表示贴边。所有标签页统一生效。',
+      )
+      .addSlider((s) =>
+        s
+          .setLimits(PANEL_PADDING_MIN, PANEL_PADDING_MAX, PANEL_PADDING_STEP)
+          .setValue(this.plugin.settings.panelPadding ?? PANEL_PADDING_DEFAULT)
+          .setDynamicTooltip()
+          .onChange(async (v) => {
+            this.plugin.settings.panelPadding = v;
+            await this.plugin.saveSettings();
+            this.applyPanelPadding(v);
+          }),
+      );
+  }
+
+  /** 把留白值实时写入所有已打开的面板容器（滑块拖动即时生效） */
+  private applyPanelPadding(v: number): void {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_ATOMIC_PANEL);
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (view?.containerEl) {
+        // 写到 containerEl（.view-content 祖先），由 .atomic-notes-panel 继承
+        view.containerEl.style.setProperty('--atomic-notes-panel-padding', `${v}px`);
+      }
+    }
   }
 
   async testConnection(): Promise<void> {

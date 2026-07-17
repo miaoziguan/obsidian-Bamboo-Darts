@@ -32,21 +32,39 @@ export class AtomicNotesPanel extends ItemView {
   }
 
   getDisplayText(): string {
-    return '原子笔记提炼';
+    return 'Bamboo Darts';
   }
 
   getIcon(): string {
-    return 'atom';
+    return 'leaf';
   }
 
   async onOpen(): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass('atomic-notes-panel');
+    // 用户可调的版面左右留白（设置页滑块驱动）。
+    // 变量写到 containerEl 本身（.view-content 祖先），由 .atomic-notes-panel 继承，
+    // 避免 children[1] 指向不稳定导致变量落空。
+    this.containerEl.style.setProperty(
+      '--atomic-notes-panel-padding',
+      `${this.plugin.settings.panelPadding ?? 56}px`,
+    );
 
-    // 标题栏：左侧标题 + 右侧设置按钮
+    // 标题栏：左侧品牌图标 + 品牌名 + 右侧设置按钮
     const headerEl = container.createDiv({ cls: 'atomic-notes-panel-header' });
-    headerEl.createEl('h3', { text: '原子笔记提炼' });
+    const brandEl = headerEl.createDiv({ cls: 'atomic-notes-brand' });
+    brandEl.innerHTML = `
+      <span class="atomic-notes-brand-icon" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+          <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+        </svg>
+      </span>
+      <span class="atomic-notes-brand-name">Bamboo Darts</span>
+    `;
     const settingBtn = headerEl.createEl('button', {
       cls: 'clickable-icon atomic-notes-setting-btn',
       attr: { 'aria-label': '打开设置', type: 'button' },

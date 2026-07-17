@@ -22,7 +22,6 @@ export class AboutTab {
   /** 渲染介绍面板到 el 容器 */
   render(el: HTMLElement): void {
     el.empty();
-    el.addClass('atomic-notes-panel');
 
     // ── 竹叶飞刃设计理念 ──
     el.createEl('div', { text: '竹叶飞刃设计理念', cls: 'atomic-notes-about-section' });

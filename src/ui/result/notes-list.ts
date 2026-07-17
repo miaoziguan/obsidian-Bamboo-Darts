@@ -37,20 +37,15 @@ export function renderNotesList(
 ): NotesListElements {
   const notesEl = container.createEl('div');
 
-  const headerEl = notesEl.createEl('div', {
-    attr: {
-      style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px',
-    },
-  });
+  const headerEl = notesEl.createEl('div', { cls: 'atomic-notes-notes-header' });
   headerEl.createEl('h3', {
     text: `提炼结果（${vm.result.notes.length} 条）`,
-    attr: { style: 'margin:0' },
   });
 
   // 全选/取消全选
   const toggleBtn = headerEl.createEl('button', {
     text: '取消全选',
-    attr: { style: 'font-size:11px;padding:2px 8px;cursor:pointer' },
+    cls: 'atomic-notes-toggle-btn',
   }) as HTMLButtonElement;
   toggleBtn.addEventListener('click', () => {
     vm.toggleAll();
@@ -58,11 +53,9 @@ export function renderNotesList(
   });
 
   // ── 筛选栏 + 搜索框 ──
-  const toolbar = notesEl.createEl('div', {
-    attr: { style: 'display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap' },
-  });
+  const toolbar = notesEl.createEl('div', { cls: 'atomic-notes-toolbar' });
 
-  const filterGroup = toolbar.createEl('div', { attr: { style: 'display:flex;gap:4px' } });
+  const filterGroup = toolbar.createEl('div', { cls: 'atomic-notes-filter-group' });
 
   const filterBtns: { mode: FilterMode; label: string }[] = [
     { mode: 'all', label: '全部' },
@@ -78,16 +71,12 @@ export function renderNotesList(
 
     const btn = filterGroup.createEl('button', {
       text: `${label}${count > 0 ? ` (${count})` : ''}`,
-      attr: {
-        style: `font-size:11px;padding:3px 10px;cursor:pointer;border-radius:6px;border:1px solid var(--background-modifier-border);background:${vm.filterMode === mode ? 'var(--interactive-accent)' : 'var(--background-secondary)'};color:${vm.filterMode === mode ? 'var(--text-on-accent)' : 'var(--text-muted)'}`,
-      },
+      cls: `atomic-notes-filter-btn${vm.filterMode === mode ? ' is-active' : ''}`,
     }) as HTMLButtonElement;
     btn.addEventListener('click', () => {
       vm.setFilterMode(mode);
       for (const [m, b] of Object.entries(filterBtnEls)) {
-        const isActive = m === mode;
-        b.style.background = isActive ? 'var(--interactive-accent)' : 'var(--background-secondary)';
-        b.style.color = isActive ? 'var(--text-on-accent)' : 'var(--text-muted)';
+        b.toggleClass('is-active', m === mode);
       }
       refreshCards(vm, notesEl);
     });
@@ -96,11 +85,10 @@ export function renderNotesList(
 
   // 搜索框
   const searchInput = toolbar.createEl('input', {
+    cls: 'atomic-notes-search-input',
     attr: {
       type: 'text',
       placeholder: '搜索标题或内容...',
-      style:
-        'flex:1;min-width:120px;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-primary)',
     },
   }) as HTMLInputElement;
   searchInput.addEventListener('input', () => {
@@ -115,7 +103,7 @@ export function renderNotesList(
   // 选中数量
   const countEl = container.createEl('p', {
     text: `已选 ${vm.selectedNotes.size} / ${vm.result.notes.length} 条`,
-    attr: { style: 'font-size:12px;color:var(--text-muted);margin:8px 0' },
+    cls: 'atomic-notes-selected-count',
   });
 
   // 操作按钮
@@ -197,7 +185,7 @@ export function renderNoteCards(vm: ResultViewModel, container: HTMLElement): vo
   if (visibleIndices.length === 0) {
     container.createEl('div', {
       text: '📭 没有匹配的笔记',
-      attr: { style: 'color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center' },
+      cls: 'atomic-notes-empty-hint',
     });
     return;
   }
@@ -283,7 +271,7 @@ function renderExpandablePreview(card: HTMLElement, note: AtomicNote): void {
     previewEl.style.cursor = 'pointer';
     expandHint = card.createEl('span', {
       text: '展开全文 ▼',
-      attr: { style: 'font-size:10px;color:var(--text-faint);cursor:pointer;user-select:none' },
+      cls: 'atomic-notes-preview-toggle',
     });
     let expanded = false;
     const toggleExpand = () => {
@@ -300,56 +288,52 @@ function renderExpandablePreview(card: HTMLElement, note: AtomicNote): void {
 function renderVerificationDetail(card: HTMLElement, note: AtomicNote): void {
   if (!note.verification || note.verification.length === 0) return;
 
-  const verifySection = card.createEl('div', { attr: { style: 'margin-top:6px' } });
-  const verifyHeader = verifySection.createEl('div', {
-    attr: { style: 'display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;padding:2px 0' },
-  });
-  const verifyArrow = verifyHeader.createEl('span', {
+  const verifySection = card.createEl('div', { cls: 'atomic-notes-verify-section' });
+  const verifyHeader = verifySection.createEl('div', { cls: 'atomic-notes-collapsible-header' });
+  verifyHeader.createEl('span', {
     text: '▸',
-    attr: { style: 'font-size:10px;transition:transform 0.2s;display:inline-block;color:var(--text-muted)' },
+    cls: 'atomic-notes-collapsible-arrow',
   });
   verifyHeader.createEl('span', {
     text: '核查详情',
-    attr: { style: 'font-size:11px;color:var(--text-accent);font-weight:600' },
+    cls: 'atomic-notes-collapsible-title',
   });
 
-  const verifyBody = verifySection.createEl('div', {
-    attr: { style: 'display:none;margin-top:6px;border-left:2px solid var(--background-modifier-border);padding-left:10px' },
-  });
+  const verifyBody = verifySection.createEl('div', { cls: 'atomic-notes-collapsible-body atomic-notes-verify-body' });
 
   let verifyOpen = false;
   verifyHeader.addEventListener('click', () => {
     verifyOpen = !verifyOpen;
-    verifyBody.style.display = verifyOpen ? 'block' : 'none';
-    verifyArrow.style.transform = verifyOpen ? 'rotate(90deg)' : 'rotate(0deg)';
+    verifyBody.toggleClass('is-open', verifyOpen);
+    verifyHeader.toggleClass('is-open', verifyOpen);
   });
 
-  const statusColorMap: Record<string, string> = {
-    已溯源: 'var(--color-green)',
-    需对比: 'var(--color-orange)',
-    超源: 'var(--color-red)',
+  const statusClassMap: Record<string, string> = {
+    已溯源: 'verify-status--green',
+    需对比: 'verify-status--orange',
+    超源: 'verify-status--red',
   };
 
   for (const item of note.verification) {
-    const row = verifyBody.createEl('div', { attr: { style: 'margin-bottom:8px' } });
-    const claimRow = row.createEl('div', { attr: { style: 'display:flex;align-items:flex-start;gap:6px' } });
+    const row = verifyBody.createEl('div', { cls: 'atomic-notes-verify-item' });
+    const claimRow = row.createEl('div', { cls: 'atomic-notes-verify-claim-row' });
     claimRow.createEl('span', {
       text: item.status,
-      attr: { style: `font-size:9px;padding:1px 6px;border-radius:8px;color:#fff;background:${statusColorMap[item.status] || 'var(--text-faint)'};white-space:nowrap;flex-shrink:0;margin-top:1px` },
+      cls: `atomic-notes-verify-status ${statusClassMap[item.status] || 'verify-status--faint'}`,
     });
-    claimRow.createEl('span', { text: item.claim, attr: { style: 'font-size:11px;color:var(--text-normal);line-height:1.4' } });
+    claimRow.createEl('span', { text: item.claim, cls: 'atomic-notes-verify-claim' });
 
     if (item.sourceText) {
       row.createEl('div', {
         text: `📖 ${item.sourceText}`,
-        attr: { style: 'font-size:10px;color:var(--text-muted);margin-top:3px;padding:4px 6px;background:var(--background-secondary);border-radius:4px;line-height:1.4' },
+        cls: 'atomic-notes-verify-source',
       });
     }
     if (item.diffNote) {
-      row.createEl('div', { text: `⚠ ${item.diffNote}`, attr: { style: 'font-size:10px;color:var(--color-orange);margin-top:2px' } });
+      row.createEl('div', { text: `⚠ ${item.diffNote}`, cls: 'atomic-notes-verify-diff' });
     }
     if (item.reason && !item.sourceText) {
-      row.createEl('div', { text: item.reason, attr: { style: 'font-size:10px;color:var(--text-faint);margin-top:2px;font-style:italic' } });
+      row.createEl('div', { text: item.reason, cls: 'atomic-notes-verify-reason' });
     }
   }
 }
@@ -363,24 +347,30 @@ function renderCardFooter(card: HTMLElement, vm: ResultViewModel, note: AtomicNo
     }
   } else {
     const footer = card.createEl('div', { cls: 'atomic-notes-card-footer' });
-    const { label: synthLabel, color: synthColor } = vm.noteSynthLabel(i);
+    const { label: synthLabel } = vm.noteSynthLabel(i);
+    const synthClass = synthLabel.includes('超源')
+      ? 'synth--red'
+      : synthLabel.includes('需对比')
+        ? 'synth--orange'
+        : synthLabel.includes('已溯源')
+          ? 'synth--green'
+          : 'synth--faint';
     footer.createEl('span', {
       text: synthLabel,
-      attr: { style: `font-size:10px;padding:2px 8px;border-radius:10px;color:#fff;background:${synthColor};font-style:italic` },
+      cls: `atomic-notes-synth-chip ${synthClass}`,
     });
   }
 }
 
 /** 编辑按钮 + 编辑面板 */
 function renderEditSection(card: HTMLElement, vm: ResultViewModel, note: AtomicNote, i: number): void {
-  const editSection = card.createEl('div', { attr: { style: 'margin-top:8px' } });
+  const editSection = card.createEl('div', { cls: 'atomic-notes-edit-section' });
   const editBtn = editSection.createEl('button', {
     text: '✎ 编辑',
-    attr: { style: 'font-size:11px;padding:2px 10px;cursor:pointer;background:var(--background-primary);border:1px solid var(--background-modifier-border);border-radius:4px;color:var(--text-muted)' },
+    cls: 'atomic-notes-edit-btn',
   });
   const editPanel = editSection.createEl('div', {
-    cls: 'atomic-notes-edit-panel',
-    attr: { style: 'display:none;margin-top:8px' },
+    cls: 'atomic-notes-edit-panel is-hidden',
   });
 
   let isEditing = false;
@@ -388,10 +378,10 @@ function renderEditSection(card: HTMLElement, vm: ResultViewModel, note: AtomicN
     isEditing = !isEditing;
     if (isEditing) {
       renderEditPanel(editPanel, card, vm, note, i);
-      editPanel.style.display = 'block';
+      editPanel.removeClass('is-hidden');
       editBtn.setText('✎ 收起编辑');
     } else {
-      editPanel.style.display = 'none';
+      editPanel.addClass('is-hidden');
       editBtn.setText('✎ 编辑');
     }
   });
@@ -400,27 +390,27 @@ function renderEditSection(card: HTMLElement, vm: ResultViewModel, note: AtomicN
 /** 编辑面板 */
 function renderEditPanel(editPanel: HTMLElement, card: HTMLElement, vm: ResultViewModel, note: AtomicNote, i: number): void {
   editPanel.empty();
-  editPanel.createEl('label', { text: '标题', attr: { style: 'font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px' } });
+  editPanel.createEl('label', { text: '标题', cls: 'atomic-notes-edit-label' });
   const titleInput = editPanel.createEl('input', {
-    attr: { type: 'text', value: note.title, style: 'width:100%;font-size:13px;padding:4px 8px;border:1px solid var(--background-modifier-border);border-radius:4px;margin-bottom:8px;box-sizing:border-box' },
+    cls: 'atomic-notes-edit-input',
+    attr: { type: 'text', value: note.title },
   }) as HTMLInputElement;
-  editPanel.createEl('label', { text: '内容', attr: { style: 'font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px' } });
+  editPanel.createEl('label', { text: '内容', cls: 'atomic-notes-edit-label' });
   const contentInput = editPanel.createEl('textarea', {
     text: note.content,
-    attr: { style: 'width:100%;min-height:100px;font-size:12px;padding:6px 8px;border:1px solid var(--background-modifier-border);border-radius:4px;margin-bottom:8px;box-sizing:border-box;resize:vertical;font-family:var(--font-text)' },
+    cls: 'atomic-notes-edit-input textarea',
   }) as HTMLTextAreaElement;
   const applyBtn = editPanel.createEl('button', {
     text: '✓ 应用修改',
-    cls: 'atomic-notes-apply-edit-btn',
-    attr: { style: 'float:right;font-size:12px;padding:4px 10px;cursor:pointer;background:var(--text-error);color:#fff;border:1px solid var(--text-error);border-radius:4px;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,0.15)' },
+    cls: 'atomic-notes-apply-edit-btn atomic-notes-apply-btn',
   });
-  editPanel.createEl('div', { attr: { style: 'clear:both' } });
+  editPanel.createEl('div', { cls: 'atomic-notes-edit-clear' });
 
   applyBtn.addEventListener('click', () => {
     const newTitle = titleInput.value.trim() || note.title;
     const newContent = contentInput.value.trim() || note.content;
     vm.editNote(i, newTitle, newContent);
-    editPanel.style.display = 'none';
+    editPanel.addClass('is-hidden');
     // 更新卡片标题
     const titleEl = card.querySelector('.atomic-notes-card-title') as HTMLElement;
     if (titleEl) titleEl.setText(`${i + 1}. ${note.title}`);
