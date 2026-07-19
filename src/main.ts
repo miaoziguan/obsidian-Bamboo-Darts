@@ -33,6 +33,8 @@ import {
 import { CancellationError } from './errors';
 import { encryptApiKey, decryptApiKey } from './utils/crypto-store';
 import { shouldShowOnboarding, markOnboarded } from './onboarding';
+import { extractKeywordSet } from './utils/tokenizer';
+import { jaccardSimilarity } from './utils/jaccard';
 
 /** 友好化常见的 API 错误信息 */
 function friendlyError(error: unknown): string {
@@ -49,6 +51,14 @@ function friendlyError(error: unknown): string {
   if (raw.includes('Failed to fetch') || raw.includes('network'))
     return '网络连接失败，请检查网络或 API URL';
   return raw;
+}
+
+/** findRelatedNotes 用的笔记特征（NoteFeature 的子结构，含关键词） */
+type RelatedNoteFeature = { path: string; title: string; keywords: string[] };
+
+/** 去除 YAML frontmatter，避免其干扰关键词提取 */
+function stripFrontmatter(text: string): string {
+  return text.replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').trim();
 }
 
 export default class AtomicNotesPlugin extends Plugin {
@@ -439,6 +449,94 @@ export default class AtomicNotesPlugin extends Plugin {
     } catch (error) {
       new Notice('无法读取剪贴板，请检查权限或使用面板的文本输入');
     }
+  }
+
+  /**
+   * 【集成 API · 稳定入口】供外部插件（如「竹杖芒鞋」阅读器）调用：
+   * 传入纯文本，复用完整的「质量门控 → 去重 → AI 提炼 → 核查 → 保存」流程。
+   *
+   * 该方法是对外契约，签名保持稳定；内部编排（runExtraction）可自由重构而不影响调用方。
+   *
+   * @param text 要提炼的正文文本（Markdown 或纯文本均可）
+   * @returns Promise，在提炼流程结束（成功/失败/取消）后 resolve
+   */
+  async extractFromText(text: string): Promise<void> {
+    const content = (text ?? '').trim();
+    if (!content) {
+      new Notice('没有可提炼的文本');
+      return;
+    }
+    await this.runExtraction({ type: 'text', content });
+  }
+
+  /**
+   * 【集成 API · 稳定入口】供外部插件（如「竹杖芒鞋」阅读器）调用：
+   * 传入一段文本，返回知识库（原子笔记）中与文本最相关的若干篇笔记，
+   * 实现「读 → 记 → 回流」的知识闭环。
+   *
+   * 复用已有的「发现索引」（每篇笔记的关键词特征缓存），O(N) 计算；
+   * 索引为空时回退直接扫描 vault 文件，保证首次也好用。
+   *
+   * @param query 查询文本（如文章正文）
+   * @param opts.topK 返回条数，默认 5
+   * @param opts.jaccardThreshold 相似度下限，默认 0.08
+   * @param opts.targetFolder 限定检索范围，默认取 settings.targetFolder
+   * @returns 相关笔记数组（path / title / score），无相关则返回空数组
+   */
+  async findRelatedNotes(
+    query: string,
+    opts: { topK?: number; jaccardThreshold?: number; targetFolder?: string } = {},
+  ): Promise<Array<{ path: string; title: string; score: number }>> {
+    const topK = opts.topK ?? 5;
+    const jaccardThreshold = opts.jaccardThreshold ?? 0.08;
+    const targetFolder =
+      opts.targetFolder ?? this.settings.targetFolder ?? '原子笔记';
+    const queryText = (query ?? '').trim();
+    if (!queryText) return [];
+
+    const qKeywords = extractKeywordSet(stripFrontmatter(queryText));
+    if (qKeywords.size === 0) return [];
+
+    // 优先复用发现索引（已含每篇笔记的关键词特征）；为空则回退读文件
+    await this.discoveryIndex.load();
+    let features: RelatedNoteFeature[] =
+      this.discoveryIndex.filterByFolder(targetFolder) as RelatedNoteFeature[];
+    if (features.length === 0) {
+      features = await this.scanFolderNotes(targetFolder);
+    }
+    if (features.length === 0) return [];
+
+    return features
+      .map((f) => ({
+        path: f.path,
+        title: f.title,
+        score: jaccardSimilarity(qKeywords, f.keywords),
+      }))
+      .filter((r) => r.score >= jaccardThreshold)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK);
+  }
+
+  /** 发现索引为空时的回退：直接扫描 vault 文件，实时提取关键词 */
+  private async scanFolderNotes(
+    folder?: string,
+  ): Promise<RelatedNoteFeature[]> {
+    const files = this.app.vault.getMarkdownFiles();
+    const filtered = folder
+      ? files.filter((f) => f.path === folder || f.path.startsWith(folder + '/'))
+      : files;
+    const out: RelatedNoteFeature[] = [];
+    // 上限保护，避免超大库阻塞查询
+    for (const f of filtered.slice(0, 500)) {
+      const raw = await this.app.vault.read(f);
+      const title = f.path.split('/').pop()?.replace(/\.md$/, '') ?? f.path;
+      out.push({
+        path: f.path,
+        title,
+        keywords: Array.from(extractKeywordSet(stripFrontmatter(raw))),
+      });
+    }
+    return out;
   }
 
   // ─── 提炼编排（委托 ExtractionService） ───
