@@ -60,6 +60,45 @@ describe('extractAtomicNotes', () => {
     expect(r.error).toContain('额度不足');
   });
 
+  it('GLM 等不支持 json_object 的模型：首次空内容自动去掉 response_format 重试成功', async () => {
+    requestUrl
+      .mockResolvedValueOnce({
+        status: 200,
+        text: '',
+        json: { choices: [{ message: { content: '' } }] }, // 模拟 GLM json_object 模式返回空内容
+      })
+      .mockResolvedValueOnce(
+        okResponse([{ title: '去掉 json_object 后正常返回', content: '这是一条足够长度的原子笔记正文说明内容示例。' }]),
+      );
+    const r = await extractAtomicNotes('内容', baseConfig);
+    expect(r.success).toBe(true);
+    expect(r.notes!.length).toBe(1);
+    expect(requestUrl).toHaveBeenCalledTimes(2);
+    // 第二次请求不应再携带 response_format
+    const calls = (requestUrl as unknown as { mock: { calls: { 0: { body: string } }[] } }).mock.calls;
+    const secondCallBody = JSON.parse(calls[1][0].body);
+    expect(secondCallBody.response_format).toBeUndefined();
+  });
+
+  it('finish_reason=length（截断）自动翻倍 max_tokens 重试', async () => {
+    requestUrl
+      .mockResolvedValueOnce({
+        status: 200,
+        text: '',
+        json: { choices: [{ message: { content: '' }, finish_reason: 'length' }] },
+      })
+      .mockResolvedValueOnce(
+        okResponse([{ title: '截断后重试成功', content: '这是一条足够长度的原子笔记正文说明内容示例。' }]),
+      );
+    const r = await extractAtomicNotes('内容', { ...baseConfig, maxTokens: 100 });
+    expect(r.success).toBe(true);
+    const calls = (requestUrl as unknown as { mock: { calls: { 0: { body: string } }[] } }).mock.calls;
+    const firstBody = JSON.parse(calls[0][0].body);
+    const secondBody = JSON.parse(calls[1][0].body);
+    expect(firstBody.max_tokens).toBe(100);
+    expect(secondBody.max_tokens).toBe(200);
+  });
+
   it('非 200 → 重试后仍失败', async () => {
     requestUrl
       .mockResolvedValueOnce({ status: 500, text: '', json: {} })

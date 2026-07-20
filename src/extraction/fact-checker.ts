@@ -13,6 +13,17 @@ import {
 import { parseJsonArrayFromAI } from '../utils/json-parser';
 import type { ApiConfig } from '../extractor';
 
+/** 最大重试次数（总尝试次数 = MAX_RETRY + 1） */
+const FC_MAX_RETRY = 1;
+
+/** 重试延迟（毫秒） */
+const FC_RETRY_DELAY_MS = 500;
+
+/** 休眠（毫秒） */
+function fcSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** 空白规范化：合并连续空格/换行/制表符为单个空格，去除首尾空白 */
 function normalizeWS(s: string): string {
   return s.replace(/[\s\n\r\t]+/g, ' ').trim();
@@ -220,54 +231,100 @@ async function semanticCompare(
 
   const userPrompt = `原文：${originalContent}\n\n未匹配声明列表：\n${claimsList}`;
 
-  const response = await requestUrl({
-    url: config.deepseekApiUrl,
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.deepseekApiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model || 'deepseek-v4-flash',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      max_tokens: config.maxTokens || 2000,
-      temperature: 0,
-    }),
-    signal: config.signal,
-    throw: false,
-  });
+  // 动态 max_tokens：当因截断（finish_reason=length）导致内容为空时，重试自动翻倍
+  let dynamicMaxTokens = config.maxTokens || 2000;
 
-  if (response.status !== 200) {
-    throw new Error(`API 返回 ${response.status}`);
-  }
-
-  const rawOutput = response.json?.choices?.[0]?.message?.content || '';
-  const parsed = parseJsonArrayFromAI<{
-    index: number;
-    status: string;
-    sourceText?: string;
-    diffNote?: string;
-    reason?: string;
-  }>(rawOutput);
-
-  if (parsed) {
-    for (const item of parsed) {
-      const status = item.status === '需对比' ? ('需对比' as const) : ('超源' as const);
-      const idx = typeof item.index === 'number' ? item.index : Number(item.index);
-      if (!isNaN(idx) && idx >= 0 && idx < unmatched.length) {
-        resultMap.set(idx, {
-          status,
-          sourceText: item.sourceText,
-          diffNote: item.diffNote,
-          reason: item.reason,
-        });
-      }
+  for (let attempt = 0; attempt <= FC_MAX_RETRY; attempt++) {
+    if (attempt > 0) {
+      console.warn(`[核查] 第 ${attempt + 1} 次尝试（重试）...`);
+      await fcSleep(FC_RETRY_DELAY_MS);
     }
-  } else {
-    console.warn('[核查] AI 输出 JSON 解析失败，已跳过对比，原始内容（前500字）：', rawOutput.slice(0, 500));
+
+    const response = await requestUrl({
+      url: config.deepseekApiUrl,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.deepseekApiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model || 'deepseek-v4-flash',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: dynamicMaxTokens,
+        temperature: 0,
+      }),
+      signal: config.signal,
+      throw: false,
+    });
+
+    // 5xx / 429 → 重试
+    if (response.status !== 200) {
+      const retryable = /5\d{2}|429/.test(String(response.status));
+      if (retryable && attempt < FC_MAX_RETRY) {
+        console.warn(`[核查] API 返回 ${response.status}，准备重试（${attempt + 1}/${FC_MAX_RETRY}）`);
+        continue;
+      }
+      throw new Error(`API 返回 ${response.status}`);
+    }
+
+    const choices = response.json?.choices;
+    const firstChoice = Array.isArray(choices) ? choices[0] : undefined;
+    const rawOutput = firstChoice?.message?.content || '';
+
+    if (!rawOutput) {
+      const finishReason = firstChoice?.finish_reason;
+      // 详细诊断日志，便于排查「HTTP 200 但内容为空」
+      console.error('[核查] API 返回 200 但内容为空，响应快照：', {
+        status: response.status,
+        finish_reason: finishReason,
+        choiceCount: Array.isArray(choices) ? choices.length : 0,
+        hasJson: Boolean(response.json),
+        reasoning_content: firstChoice?.message?.reasoning_content,
+        usage: response.json?.usage,
+        body: response.json ?? String(response.text).slice(0, 500),
+      });
+
+      // max_tokens 过小导致截断：自动翻倍重试
+      if (finishReason === 'length' && attempt < FC_MAX_RETRY) {
+        dynamicMaxTokens *= 2;
+        console.warn(`[核查] finish_reason=length，自动调大 max_tokens 至 ${dynamicMaxTokens} 后重试...`);
+        continue;
+      }
+
+      // 内容仍为空：无法解析，跳过对比但给出明确警告
+      console.warn(`[核查] AI 返回内容为空（finish_reason=${finishReason ?? '未知'}），已跳过对比`);
+      return resultMap;
+    }
+
+    const parsed = parseJsonArrayFromAI<{
+      index: number;
+      status: string;
+      sourceText?: string;
+      diffNote?: string;
+      reason?: string;
+    }>(rawOutput);
+
+    if (parsed) {
+      for (const item of parsed) {
+        const status = item.status === '需对比' ? ('需对比' as const) : ('超源' as const);
+        const idx = typeof item.index === 'number' ? item.index : Number(item.index);
+        if (!isNaN(idx) && idx >= 0 && idx < unmatched.length) {
+          resultMap.set(idx, {
+            status,
+            sourceText: item.sourceText,
+            diffNote: item.diffNote,
+            reason: item.reason,
+          });
+        }
+      }
+    } else {
+      console.warn('[核查] AI 输出 JSON 解析失败，已跳过对比，原始内容（前500字）：', rawOutput.slice(0, 500));
+    }
+
+    return resultMap;
   }
 
   return resultMap;

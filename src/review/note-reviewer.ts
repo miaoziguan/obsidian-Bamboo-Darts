@@ -16,6 +16,17 @@ import { AtomicNote } from '../utils/notes-standards';
 import { AI_TEMPERATURE } from '../constants';
 import { parseJsonArrayFromAI } from '../utils/json-parser';
 
+/** 最大重试次数（总尝试次数 = NR_MAX_RETRY + 1） */
+const NR_MAX_RETRY = 1;
+
+/** 重试延迟（毫秒） */
+const NR_RETRY_DELAY_MS = 500;
+
+/** 休眠（毫秒） */
+function nrSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export interface ReviewConfig {
   deepseekApiKey: string;
   deepseekApiUrl: string;
@@ -62,34 +73,104 @@ export async function reviewNotes(
   const minScore = config.minScore ?? 6;
   const prompt = buildReviewPrompt(notes, minScore);
 
-  try {
-    const response = await requestUrl({
-      url: config.deepseekApiUrl,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.deepseekApiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          {
-            role: 'system',
-            content: '你是严格的笔记审查员。只对笔记评分，不修改笔记内容。输出严格符合 JSON 格式。',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        max_tokens: config.maxTokens,
-        temperature: AI_TEMPERATURE,
-      }),
-      signal: config.signal,
-      throw: false,
-    });
+  // 空内容 / 调用失败的统一降级：保留全部原始笔记，避免静默丢弃
+  const fallbackKeepAll = (): {
+    reviewedNotes: AtomicNote[];
+    reviewDetails: ReviewResult[];
+    success: boolean;
+  } => ({
+    reviewedNotes: [...notes],
+    reviewDetails: notes.map((note, i) => ({
+      index: i,
+      title: note.title,
+      insightScore: 3,
+      knowledgeScore: 3,
+      finalScore: 6,
+      verdict: '保留' as const,
+      reason: '复查失败，默认保留',
+    })),
+    success: false,
+  });
 
-    const aiContent = response.json?.choices?.[0]?.message?.content || '';
+  // 动态 max_tokens：截断（finish_reason=length）导致空内容时自动翻倍重试
+  let dynamicMaxTokens = config.maxTokens;
+
+  try {
+    let aiContent = '';
+    for (let attempt = 0; attempt <= NR_MAX_RETRY; attempt++) {
+      if (attempt > 0) {
+        console.warn(`[笔记复查] 第 ${attempt + 1} 次尝试（重试）...`);
+        await nrSleep(NR_RETRY_DELAY_MS);
+      }
+
+      const response = await requestUrl({
+        url: config.deepseekApiUrl,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.deepseekApiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            {
+              role: 'system',
+              content: '你是严格的笔记审查员。只对笔记评分，不修改笔记内容。输出严格符合 JSON 格式。',
+            },
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          max_tokens: dynamicMaxTokens,
+          temperature: AI_TEMPERATURE,
+        }),
+        signal: config.signal,
+        throw: false,
+      });
+
+      // 5xx / 429 → 重试
+      if (response.status !== 200) {
+        const retryable = /5\d{2}|429/.test(String(response.status));
+        if (retryable && attempt < NR_MAX_RETRY) {
+          console.warn(`[笔记复查] API 返回 ${response.status}，准备重试（${attempt + 1}/${NR_MAX_RETRY}）`);
+          continue;
+        }
+        throw new Error(`API 返回 ${response.status}`);
+      }
+
+      const choices = response.json?.choices;
+      const firstChoice = Array.isArray(choices) ? choices[0] : undefined;
+      aiContent = firstChoice?.message?.content || '';
+
+      if (!aiContent) {
+        const finishReason = firstChoice?.finish_reason;
+        // 详细诊断日志，便于排查「HTTP 200 但内容为空」
+        console.error('[笔记复查] API 返回 200 但内容为空，响应快照：', {
+          status: response.status,
+          finish_reason: finishReason,
+          choiceCount: Array.isArray(choices) ? choices.length : 0,
+          hasJson: Boolean(response.json),
+          reasoning_content: firstChoice?.message?.reasoning_content,
+          usage: response.json?.usage,
+          body: response.json ?? String(response.text).slice(0, 500),
+        });
+
+        // max_tokens 过小导致截断：自动翻倍重试
+        if (finishReason === 'length' && attempt < NR_MAX_RETRY) {
+          dynamicMaxTokens *= 2;
+          console.warn(`[笔记复查] finish_reason=length，自动调大 max_tokens 至 ${dynamicMaxTokens} 后重试...`);
+          continue;
+        }
+
+        // 内容仍为空：降级保留全部，避免静默丢弃
+        console.warn(`[笔记复查] AI 返回内容为空（finish_reason=${finishReason ?? '未知'}），降级保留全部笔记`);
+        return fallbackKeepAll();
+      }
+
+      break; // 拿到内容，跳出重试
+    }
+
     const reviewDetails = parseReviewOutput(aiContent, notes.length, minScore);
 
     // 注入原始标题，供 UI 在复查过滤后仍能匹配到对应笔记
@@ -106,19 +187,7 @@ export async function reviewNotes(
     return { reviewedNotes, reviewDetails, success: true };
   } catch (error) {
     console.error('[笔记复查] AI 调用失败，降级处理（返回原始笔记）：', error);
-    return {
-      reviewedNotes: [...notes],
-      reviewDetails: notes.map((note, i) => ({
-        index: i,
-        title: note.title,
-        insightScore: 3,
-        knowledgeScore: 3,
-        finalScore: 6,
-        verdict: '保留' as const,
-        reason: '复查失败，默认保留',
-      })),
-      success: false,
-    };
+    return fallbackKeepAll();
   }
 }
 

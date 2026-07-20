@@ -247,12 +247,10 @@ describe('verifyClaims', () => {
     expect(item?.reason).toContain('原文无此内容');
   });
 
-  it('semanticCompare 返回非 200 → 抛错 → 全部降级超源', async () => {
-    mockRequestUrl.mockResolvedValueOnce({
-      status: 500,
-      text: '',
-      json: {},
-    } as any);
+  it('semanticCompare 返回非 200 → 重试后仍失败 → 全部降级超源', async () => {
+    mockRequestUrl
+      .mockResolvedValueOnce({ status: 500, text: '', json: {} } as any)
+      .mockResolvedValueOnce({ status: 500, text: '', json: {} } as any);
     const r = await verifyNotes('无关原文。', [makeNote('n1', '增长了88%。')]);
     expect(r.outOfScope).toBe(1);
     const item = r.notes[0].verification!.find((v) => v.status === '超源');
