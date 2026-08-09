@@ -9,7 +9,7 @@ import {
 import { computeIdfTable, computeTfIdfVector, IdfTable } from '../src/dedup/idf';
 import type { DataAdapter } from 'obsidian';
 
-/** 最小内存 DataAdapter mock */
+/** 最小内存 DataAdapter mock，支持 list（按目录列举，模拟真实 adapter 的文件夹作用域） */
 function makeAdapter(): DataAdapter & { _store: Map<string, string> } {
   const store = new Map<string, string>();
   return {
@@ -22,6 +22,24 @@ function makeAdapter(): DataAdapter & { _store: Map<string, string> } {
     },
     async write(p: string, data: string) {
       store.set(p, data);
+    },
+    async list(p: string) {
+      const base = p.endsWith('/') ? p.slice(0, -1) : p;
+      const baseLen = base.length;
+      const files: string[] = [];
+      const folders = new Set<string>();
+      for (const key of store.keys()) {
+        if (key === base) continue;
+        if (!key.startsWith(base === '' ? '' : base + '/')) continue;
+        const rest = key.slice(baseLen === 0 ? 0 : baseLen + 1);
+        const slash = rest.indexOf('/');
+        if (slash === -1) {
+          if (key !== base) files.push(key);
+        } else {
+          folders.add(key.slice(0, baseLen + 1 + slash));
+        }
+      }
+      return { files, folders: [...folders] };
     },
   } as unknown as DataAdapter & { _store: Map<string, string> };
 }
@@ -69,37 +87,37 @@ describe('DedupCacheManager — set/get 基本流程', () => {
     vault = new Vault();
   });
 
-  it('未设置缓存时 get 返回 null', () => {
-    expect(mgr.get('folderA', vault)).toBeNull();
+  it('未设置缓存时 get 返回 null', async () => {
+    expect(await mgr.get('folderA', vault)).toBeNull();
   });
 
-  it('set 后 get 命中（文件全部有效直接返回原缓存）', () => {
+  it('set 后 get 命中（文件全部有效直接返回原缓存）', async () => {
     const file = vault.addFile('folderA/a.md', 'x', 1000);
     const notes = [makeNote(file.path, ['alpha', 'beta'], 1000)];
     const { idfTable, dfCounts } = makeIdfAndDf(notes);
     mgr.set('folderA', notes, idfTable, dfCounts);
 
-    const got = mgr.get('folderA', vault);
+    const got = await mgr.get('folderA', vault);
     expect(got).not.toBeNull();
     expect(got!.notes.length).toBe(1);
   });
 
-  it('TTL 过期后 get 删除缓存并返回 null', () => {
+  it('TTL 过期后 get 删除缓存并返回 null', async () => {
     const file = vault.addFile('folderA/a.md', 'x', 1000);
     const notes = [makeNote(file.path, ['alpha'], 1000)];
     const { idfTable, dfCounts } = makeIdfAndDf(notes);
     mgr.set('folderA', notes, idfTable, dfCounts);
 
     // 把内部 timestamp 拨到过期
-    const cache = mgr.get('folderA', vault)!;
+    const cache = (await mgr.get('folderA', vault))!;
     cache.timestamp = Date.now() - 6 * 60 * 1000;
 
-    expect(mgr.get('folderA', vault)).toBeNull();
+    expect(await mgr.get('folderA', vault)).toBeNull();
     // 再次读取仍为 null（已删除）
-    expect(mgr.get('folderA', vault)).toBeNull();
+    expect(await mgr.get('folderA', vault)).toBeNull();
   });
 
-  it('文件 mtime 变动导致该笔记被剔除 → 触发全量重建（返回 null）', () => {
+  it('文件 mtime 变动导致该笔记被剔除 → 触发全量重建（返回 null）', async () => {
     const f1 = vault.addFile('folderA/a.md', 'x', 1000);
     const f2 = vault.addFile('folderA/b.md', 'y', 1000);
     const notes = [
@@ -111,10 +129,10 @@ describe('DedupCacheManager — set/get 基本流程', () => {
 
     // 修改一个文件 mtime → 变动过半（2 中 1 剔除 = 50%）走重建
     f1.stat.mtime = 2000;
-    expect(mgr.get('folderA', vault)).toBeNull();
+    expect(await mgr.get('folderA', vault)).toBeNull();
   });
 
-  it('仅删除一个文件、无新增 → 增量更新 IDF 后返回缓存', () => {
+  it('仅删除一个文件、无新增 → 增量更新 IDF 后返回缓存', async () => {
     const f1 = vault.addFile('folderA/a.md', 'x', 1000);
     const f2 = vault.addFile('folderA/b.md', 'y', 1000);
     const f3 = vault.addFile('folderA/c.md', 'z', 1000);
@@ -133,7 +151,7 @@ describe('DedupCacheManager — set/get 基本流程', () => {
     // 用重新构建 vault 的方式模拟"文件被删"
     (vault as unknown as { _files: Map<string, unknown> })._files.delete('folderA/c.md');
 
-    const got = mgr.get('folderA', vault);
+    const got = await mgr.get('folderA', vault);
     expect(got).not.toBeNull();
     expect(got!.notes.length).toBe(2);
     // IDF docCount 已更新
@@ -156,9 +174,9 @@ describe('DedupCacheManager — LRU 淘汰', () => {
     }
 
     // folder0 应被淘汰
-    expect(mgr.get('folder0', vault)).toBeNull();
+    expect(await mgr.get('folder0', vault)).toBeNull();
     // 最近的 folder5 仍在
-    expect(mgr.get('folder5', vault)).not.toBeNull();
+    expect(await mgr.get('folder5', vault)).not.toBeNull();
   });
 });
 
@@ -177,7 +195,7 @@ describe('DedupCacheManager — 持久化与恢复', () => {
     // 新管理器共用同一 adapter → 应从磁盘恢复
     const mgr2 = new DedupCacheManager();
     await mgr2.initialize(adapter, 'plugin-dir');
-    const restored = mgr2.get('folderA', vault);
+    const restored = await mgr2.get('folderA', vault);
     expect(restored).not.toBeNull();
     expect(restored!.notes.length).toBe(1);
     expect(restored!.notes[0].path).toBe('folderA/a.md');
@@ -235,7 +253,7 @@ describe('DedupCacheManager — 持久化与恢复', () => {
     const mgr = new DedupCacheManager();
     await mgr.initialize(adapter, 'plugin-dir');
     const vault = new Vault();
-    expect(mgr.get('empty', vault)).toBeNull();
+    expect(await mgr.get('empty', vault)).toBeNull();
   });
 });
 
@@ -250,7 +268,7 @@ describe('DedupCacheManager — invalidate 与单例', () => {
     mgr.set('folderA', notes, idfTable, dfCounts);
 
     mgr.invalidate();
-    expect(mgr.get('folderA', vault)).toBeNull();
+    expect(await mgr.get('folderA', vault)).toBeNull();
   });
 
   it('getDefaultDedupCache 返回同一单例', () => {

@@ -145,7 +145,7 @@ export async function saveNotes(
 
     // 预获取目标文件夹中已存在的文件列表（仅列举目标文件夹，不枚举全库）
     const existingPaths = new Set(
-      getFolderMarkdownFiles(app.vault, fullConfig.targetFolder).map((f) => f.path),
+      (await getFolderMarkdownFiles(app.vault, fullConfig.targetFolder)).map((f) => f.path),
     );
 
     // 批量生成文件名和内容

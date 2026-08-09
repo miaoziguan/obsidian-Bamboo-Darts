@@ -233,7 +233,7 @@ export async function buildSimilarityMatrix(
 
   // 索引未启用或为空时，回退到读文件（仅列举目标文件夹，避免枚举全库）
   if (notes.length === 0) {
-    const files = getFolderMarkdownFiles(vault, targetFolder);
+    const files = await getFolderMarkdownFiles(vault, targetFolder);
 
     const limit = Math.min(files.length, maxNotes);
     for (let i = 0; i < limit; i += DEDUP_BATCH_SIZE) {

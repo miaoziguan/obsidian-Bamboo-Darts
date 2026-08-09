@@ -521,7 +521,7 @@ export default class AtomicNotesPlugin extends Plugin {
   private async scanFolderNotes(
     folder?: string,
   ): Promise<RelatedNoteFeature[]> {
-    const filtered = getFolderMarkdownFiles(this.app.vault, folder);
+    const filtered = await getFolderMarkdownFiles(this.app.vault, folder);
     const out: RelatedNoteFeature[] = [];
     // 上限保护，避免超大库阻塞查询
     for (const f of filtered.slice(0, 500)) {
@@ -638,7 +638,7 @@ export default class AtomicNotesPlugin extends Plugin {
 
     const targetFolder =
       this.settings.dedupTargetFolder?.trim() || this.settings.targetFolder || '原子笔记';
-    const files = getFolderMarkdownFiles(this.app.vault, targetFolder);
+    const files = await getFolderMarkdownFiles(this.app.vault, targetFolder);
     if (files.length === 0) {
       new Notice(`目标文件夹 "${targetFolder}" 中没有 Markdown 文件`);
       return;

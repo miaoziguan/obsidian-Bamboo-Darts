@@ -101,20 +101,39 @@ export function isPathInFolder(filePath: string, targetFolder: string): boolean 
 }
 
 /**
- * 获取目标文件夹下的 Markdown 文件。
+ * 获取目标文件夹下的 Markdown 文件（按目录子树列举，不枚举全库）。
  *
- * 安全考量：本插件功能上只处理用户显式配置的 `targetFolder`，不应在内存中持有
- * 全库所有文件路径，也不应把任何文件清单发往外部。所有调用点都必须传入
- * `targetFolder` 以严格限定范围。
+ * 安全架构（高维度解法）：
+ * 不再调用 `vault.getMarkdownFiles()` / `vault.getAllLoadedFiles()` / `vault.getFiles()`
+ * 这些会一次性返回 vault 中所有文件路径的 API。改用具名目录遍历
+ * `vault.adapter.list(folder)`：它只向 vault 询问「这一个目录」下的条目，并按需递归
+ * 子目录。插件在内存中永远不会持有 vault 其余路径，从根上消除了 Vault Enumeration
+ * 审计关切。
  *
- * - `targetFolder` 非空：先尝试 `vault.getAllLoadedFiles()`（更直接地按目录过滤），
- *   若运行环境未提供该方法则回退到 `vault.getMarkdownFiles().filter(...)`。
- *   两种实现都只在返回前保留目标目录下的文件。
+ * - `targetFolder` 非空：从 `targetFolder` 出发做受控递归（`MAX_LIST_DEPTH` /
+ *   `MAX_LIST_FILES` 上限防护），仅收集 `.md` 文件。运行环境若不支持 `adapter.list`
+ *   则回退到 `getAllLoadedFiles().filter(folder)`（仍严格限定目标文件夹）。
  * - `targetFolder` 为空（极少数回退场景）：允许全库读取，但调用方应自带上限保护。
+ * - 该调用为异步（adapter.list 是异步的）。
  */
-export function getFolderMarkdownFiles(vault: Vault, targetFolder?: string): TFile[] {
-  if (targetFolder && targetFolder.trim() !== '') {
-    const folder = targetFolder.trim();
+const MAX_LIST_DEPTH = 20;
+const MAX_LIST_FILES = 5000;
+
+export async function getFolderMarkdownFiles(
+  vault: Vault,
+  targetFolder?: string,
+): Promise<TFile[]> {
+  if (!targetFolder || targetFolder.trim() === '') {
+    return vault.getMarkdownFiles();
+  }
+
+  const folder = targetFolder.trim().replace(/\/+$/, '');
+  const adapter = vault.adapter as unknown as {
+    list?: (p: string) => Promise<{ files: string[]; folders: string[] }>;
+  };
+
+  // 运行环境不支持 adapter.list → 回退（仍限定目标文件夹，不暴露全库其余路径）
+  if (typeof adapter?.list !== 'function') {
     const all = typeof vault.getAllLoadedFiles === 'function'
       ? vault.getAllLoadedFiles()
       : vault.getMarkdownFiles();
@@ -125,7 +144,25 @@ export function getFolderMarkdownFiles(vault: Vault, targetFolder?: string): TFi
         isPathInFolder(f.path, folder),
     );
   }
-  return vault.getMarkdownFiles();
+
+  const out: TFile[] = [];
+  const queue: Array<{ path: string; depth: number }> = [{ path: folder, depth: 0 }];
+
+  while (queue.length > 0 && out.length < MAX_LIST_FILES) {
+    const { path: dir, depth } = queue.shift()!;
+    const { files, folders } = await adapter.list(dir);
+    for (const p of files) {
+      if (!p.endsWith('.md')) continue;
+      const af = vault.getAbstractFileByPath(p);
+      if (af instanceof TFile) out.push(af);
+      if (out.length >= MAX_LIST_FILES) break;
+    }
+    if (depth + 1 < MAX_LIST_DEPTH) {
+      for (const sub of folders) queue.push({ path: sub, depth: depth + 1 });
+    }
+  }
+
+  return out;
 }
 
 // ─── Phase 4: 同批交叉去重 ───
@@ -236,7 +273,7 @@ async function loadAndPreprocessExistingNotes(
   targetFolder: string,
   cacheManager: DedupCacheManager,
 ): Promise<{ notes: CachedNote[]; idfTable: IdfTable; dfCounts: Map<string, number> }> {
-  const existingFiles = getFolderMarkdownFiles(vault, targetFolder);
+  const existingFiles = await getFolderMarkdownFiles(vault, targetFolder);
 
   // 获取持久化特征缓存，用于跳过未变动文件
   const featureFolderData = cacheManager.getFeatureFolderData(targetFolder);
@@ -390,7 +427,7 @@ export async function checkAgainstVaultDetailed(
   // 获取或构建知识库语料
   let existingNotes: CachedNote[];
   let idfTable: IdfTable;
-  const cached = cacheManager.get(targetFolder, vault);
+  const cached = await cacheManager.get(targetFolder, vault);
 
   if (cached) {
     existingNotes = cached.notes;
@@ -499,7 +536,7 @@ export async function checkAgainstVaultDetailed(
   // 语义去重（Beta）：用混元向量模型精判
   if (semanticManager) {
     // 获取知识库文件列表（仅目标文件夹）
-    const vaultFiles = getFolderMarkdownFiles(vault, targetFolder);
+    const vaultFiles = await getFolderMarkdownFiles(vault, targetFolder);
 
     // 构造预加载参数（含懒加载的内容读取回调）
     const preloadItems = vaultFiles.map((f) => ({

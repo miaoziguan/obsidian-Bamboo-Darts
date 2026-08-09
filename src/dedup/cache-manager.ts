@@ -95,7 +95,7 @@ export class DedupCacheManager {
   }
 
   /** 获取某文件夹的缓存，自动增量更新变动文件 */
-  get(targetFolder: string, vault: Vault): DedupCache | null {
+  async get(targetFolder: string, vault: Vault): Promise<DedupCache | null> {
     const cached = this.caches.get(targetFolder);
     if (!cached) return null;
     if (Date.now() - cached.timestamp > DEDUP_CACHE_TTL) {
@@ -110,8 +110,8 @@ export class DedupCacheManager {
     // 索引缓存笔记路径
     const cacheByPath = new Map(cached.notes.map((n) => [n.path, n]));
 
-    // 当前 vault 中目标文件夹的文件（仅列举该目录，不枚举全库）
-    const folderFiles = getFolderMarkdownFiles(vault, targetFolder);
+    // 当前 vault 中目标文件夹的文件（按目录子树列举，不枚举全库）
+    const folderFiles = await getFolderMarkdownFiles(vault, targetFolder);
 
     // 删除/变动的文件：移除 DF 贡献并剔除
     for (const note of cached.notes) {
