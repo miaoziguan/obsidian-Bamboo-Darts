@@ -58,11 +58,11 @@ export class DiscoveryTab {
       });
 
     const card = el.createEl('div', { cls: 'atomic-notes-discovery-card' });
-    this.renderRecommendation(card);
+    void this.renderRecommendation(card);
   }
 
   /** 渲染关联推荐（含搜索选择器 + 相似度计算） */
-  private renderRecommendation(container: HTMLElement): void {
+  private async renderRecommendation(container: HTMLElement): Promise<void> {
     const app = this.plugin.app;
     const settings = this.plugin.settings;
     const discoveryIndex = this.plugin.discoveryIndex;
