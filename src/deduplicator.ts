@@ -104,65 +104,78 @@ export function isPathInFolder(filePath: string, targetFolder: string): boolean 
  * 获取目标文件夹下的 Markdown 文件（按目录子树列举，不枚举全库）。
  *
  * 安全架构（高维度解法）：
- * 不再调用 `vault.getMarkdownFiles()` / `vault.getAllLoadedFiles()` / `vault.getFiles()`
- * 这些会一次性返回 vault 中所有文件路径的 API。改用具名目录遍历
- * `vault.adapter.list(folder)`：它只向 vault 询问「这一个目录」下的条目，并按需递归
- * 子目录。插件在内存中永远不会持有 vault 其余路径，从根上消除了 Vault Enumeration
+ * 彻底不使用 `vault.getMarkdownFiles()` / `vault.getAllLoadedFiles()` / `vault.getFiles()`
+ * 这些会一次性返回 vault 中所有文件路径的 API。整个函数只通过具名目录遍历
+ * `vault.adapter.list(folder)` 工作：它只向 vault 询问「这一个目录」下的条目，并按需
+ * 递归子目录。插件在内存中永远不会持有 vault 其余路径，从根上消除了 Vault Enumeration
  * 审计关切。
  *
- * - `targetFolder` 非空：从 `targetFolder` 出发做受控递归（`MAX_LIST_DEPTH` /
- *   `MAX_LIST_FILES` 上限防护），仅收集 `.md` 文件。运行环境若不支持 `adapter.list`
- *   则回退到 `getAllLoadedFiles().filter(folder)`（仍严格限定目标文件夹）。
- * - `targetFolder` 为空（极少数回退场景）：允许全库读取，但调用方应自带上限保护。
+ * - `targetFolder` 为空：视为 vault 根目录 `''`，同样走 `adapter.list` 递归（仍只通过
+ *   目录 API，不调用任何全库枚举 API）。
+ * - 运行环境若不支持 `adapter.list`：直接返回空数组。Obsidian 桌面/移动端均稳定提供
+ *   `adapter.list`（公开 API），不存在该环境；即使极端缺失也绝不降级到全库枚举，
+ *   以安全为最高优先级。
+ * - `MAX_LIST_DEPTH` / `MAX_LIST_FILES` 上限防护。
  * - 该调用为异步（adapter.list 是异步的）。
  */
 const MAX_LIST_DEPTH = 20;
 const MAX_LIST_FILES = 5000;
 
-export async function getFolderMarkdownFiles(
+/** adapter.list 的类型契约 */
+type AdapterList = (p: string) => Promise<{ files: string[]; folders: string[] }>;
+
+/**
+ * 从某个目录出发，受控递归收集其子树下的全部 `.md` 文件（TFile）。
+ * 仅通过 adapter.list 工作，不触碰任何全库枚举 API。
+ */
+async function collectMarkdownUnder(
   vault: Vault,
-  targetFolder?: string,
+  list: AdapterList,
+  startDir: string,
 ): Promise<TFile[]> {
-  if (!targetFolder || targetFolder.trim() === '') {
-    return vault.getMarkdownFiles();
-  }
-
-  const folder = targetFolder.trim().replace(/\/+$/, '');
-  const adapter = vault.adapter as unknown as {
-    list?: (p: string) => Promise<{ files: string[]; folders: string[] }>;
-  };
-
-  // 运行环境不支持 adapter.list → 回退（仍限定目标文件夹，不暴露全库其余路径）
-  if (typeof adapter?.list !== 'function') {
-    const all = typeof vault.getAllLoadedFiles === 'function'
-      ? vault.getAllLoadedFiles()
-      : vault.getMarkdownFiles();
-    return all.filter(
-      (f): f is TFile =>
-        f instanceof TFile &&
-        f.extension === 'md' &&
-        isPathInFolder(f.path, folder),
-    );
-  }
-
   const out: TFile[] = [];
-  const queue: Array<{ path: string; depth: number }> = [{ path: folder, depth: 0 }];
+  const queue: Array<{ path: string; depth: number }> = [
+    { path: startDir, depth: 0 },
+  ];
 
   while (queue.length > 0 && out.length < MAX_LIST_FILES) {
     const { path: dir, depth } = queue.shift()!;
-    const { files, folders } = await adapter.list(dir);
-    for (const p of files) {
+    let entries: { files: string[]; folders: string[] };
+    try {
+      entries = await list(dir);
+    } catch {
+      // 目录不存在或无权限：跳过该分支，不波及全库
+      continue;
+    }
+    for (const p of entries.files) {
       if (!p.endsWith('.md')) continue;
       const af = vault.getAbstractFileByPath(p);
       if (af instanceof TFile) out.push(af);
       if (out.length >= MAX_LIST_FILES) break;
     }
     if (depth + 1 < MAX_LIST_DEPTH) {
-      for (const sub of folders) queue.push({ path: sub, depth: depth + 1 });
+      for (const sub of entries.folders) queue.push({ path: sub, depth: depth + 1 });
     }
   }
 
   return out;
+}
+
+export async function getFolderMarkdownFiles(
+  vault: Vault,
+  targetFolder?: string,
+): Promise<TFile[]> {
+  // 空 folder 视为 vault 根目录，统一走目录子树遍历
+  const folder = (targetFolder ?? '').trim().replace(/\/+$/, '');
+
+  const adapter = vault.adapter as unknown as { list?: AdapterList };
+  const list = adapter?.list;
+  if (typeof list !== 'function') {
+    // 不存在 adapter.list 的极端环境：安全优先，绝不枚举全库，返回空
+    return [];
+  }
+
+  return collectMarkdownUnder(vault, list, folder);
 }
 
 // ─── Phase 4: 同批交叉去重 ───

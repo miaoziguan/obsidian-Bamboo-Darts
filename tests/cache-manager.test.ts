@@ -9,6 +9,34 @@ import {
 import { computeIdfTable, computeTfIdfVector, IdfTable } from '../src/dedup/idf';
 import type { DataAdapter } from 'obsidian';
 
+/**
+ * 给测试用的 vault mock 注入 `adapter.list`，基于 vault 已加载文件模拟真实目录列举。
+ * （仅测试环境；生产代码 getFolderMarkdownFiles 自带的 adapter.list 实现不依赖全库枚举 API。）
+ */
+function installListAdapter(v: Vault): void {
+  const adapter = (v.adapter ?? {}) as unknown as {
+    list?: (p: string) => Promise<{ files: string[]; folders: string[] }>;
+  };
+  adapter.list = async (dir: string) => {
+    const all = v.getMarkdownFiles();
+    const base = dir === '' ? '' : dir.endsWith('/') ? dir : dir + '/';
+    const files: string[] = [];
+    const folders = new Set<string>();
+    for (const f of all) {
+      if (!f.path.startsWith(base)) continue;
+      const rest = f.path.slice(base.length);
+      const slash = rest.indexOf('/');
+      if (slash === -1) {
+        if (rest.length > 0) files.push(f.path);
+      } else {
+        folders.add(base + rest.slice(0, slash));
+      }
+    }
+    return { files, folders: [...folders] };
+  };
+  (v as unknown as { adapter: unknown }).adapter = adapter;
+}
+
 /** 最小内存 DataAdapter mock，支持 list（按目录列举，模拟真实 adapter 的文件夹作用域） */
 function makeAdapter(): DataAdapter & { _store: Map<string, string> } {
   const store = new Map<string, string>();
@@ -85,6 +113,7 @@ describe('DedupCacheManager — set/get 基本流程', () => {
     mgr = new DedupCacheManager();
     await mgr.initialize(makeAdapter(), 'plugin-dir');
     vault = new Vault();
+    installListAdapter(vault);
   });
 
   it('未设置缓存时 get 返回 null', async () => {
@@ -164,6 +193,7 @@ describe('DedupCacheManager — LRU 淘汰', () => {
     const mgr = new DedupCacheManager();
     await mgr.initialize(makeAdapter(), 'plugin-dir');
     const vault = new Vault();
+    installListAdapter(vault);
 
     for (let i = 0; i < 6; i++) {
       const folder = `folder${i}`;
@@ -186,6 +216,7 @@ describe('DedupCacheManager — 持久化与恢复', () => {
     const mgr1 = new DedupCacheManager();
     await mgr1.initialize(adapter, 'plugin-dir');
     const vault = new Vault();
+    installListAdapter(vault);
     const file = vault.addFile('folderA/a.md', 'x', 1000);
     const notes = [makeNote(file.path, ['alpha', 'beta', 'gamma'], 1000)];
     const { idfTable, dfCounts } = makeIdfAndDf(notes);
@@ -205,6 +236,7 @@ describe('DedupCacheManager — 持久化与恢复', () => {
     const mgr = new DedupCacheManager();
     await mgr.initialize(makeAdapter(), 'plugin-dir');
     const vault = new Vault();
+    installListAdapter(vault);
     const file = vault.addFile('folderA/a.md', 'x', 1000);
     const notes = [makeNote(file.path, ['alpha'], 1000)];
     const { idfTable, dfCounts } = makeIdfAndDf(notes);
@@ -223,6 +255,7 @@ describe('DedupCacheManager — 持久化与恢复', () => {
     const mgr = new DedupCacheManager();
     await mgr.initialize(adapter, 'plugin-dir');
     const vault = new Vault();
+    installListAdapter(vault);
     const file = vault.addFile('folderA/a.md', 'x', 1000);
     const notes = [makeNote(file.path, ['alpha'], 1000)];
     const { idfTable, dfCounts } = makeIdfAndDf(notes);
@@ -253,6 +286,7 @@ describe('DedupCacheManager — 持久化与恢复', () => {
     const mgr = new DedupCacheManager();
     await mgr.initialize(adapter, 'plugin-dir');
     const vault = new Vault();
+    installListAdapter(vault);
     expect(await mgr.get('empty', vault)).toBeNull();
   });
 });
@@ -262,6 +296,7 @@ describe('DedupCacheManager — invalidate 与单例', () => {
     const mgr = new DedupCacheManager();
     await mgr.initialize(makeAdapter(), 'plugin-dir');
     const vault = new Vault();
+    installListAdapter(vault);
     const file = vault.addFile('folderA/a.md', 'x', 1000);
     const notes = [makeNote(file.path, ['alpha'], 1000)];
     const { idfTable, dfCounts } = makeIdfAndDf(notes);

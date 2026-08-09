@@ -1,12 +1,40 @@
 import { describe, it, expect } from 'vitest';
 import { crossCheckBatch, tokenize, isPathInFolder, checkAgainstVaultDetailed } from '../src/deduplicator';
-import { Vault } from 'obsidian';
+import { Vault } from '../tests/__mocks__/obsidian';
 import { AtomicNote } from '../src/utils/notes-standards';
 
 // ─── 辅助函数 ───
 
 function makeNote(title: string, content: string): AtomicNote {
   return { title, content, createdAt: '2026-01-01T00:00:00Z' };
+}
+
+/**
+ * 给测试用的 vault 桩注入 `adapter.list`，基于已加载文件模拟真实 Obsidian 的目录列举。
+ * （仅测试环境使用；生产代码 getFolderMarkdownFiles 自带该实现，不依赖全库枚举 API。）
+ */
+function installListAdapter(vault: Vault): void {
+  const adapter = (vault.adapter ?? {}) as unknown as {
+    list?: (p: string) => Promise<{ files: string[]; folders: string[] }>;
+  };
+  adapter.list = async (dir: string) => {
+    const all = vault.getMarkdownFiles();
+    const base = dir === '' ? '' : dir.endsWith('/') ? dir : dir + '/';
+    const files: string[] = [];
+    const folders = new Set<string>();
+    for (const f of all) {
+      if (!f.path.startsWith(base)) continue;
+      const rest = f.path.slice(base.length);
+      const slash = rest.indexOf('/');
+      if (slash === -1) {
+        if (rest.length > 0) files.push(f.path);
+      } else {
+        folders.add(base + rest.slice(0, slash));
+      }
+    }
+    return { files, folders: [...folders] };
+  };
+  (vault as unknown as { adapter: unknown }).adapter = adapter;
 }
 
 // ─── tokenize 测试 ───
@@ -172,6 +200,7 @@ describe('isPathInFolder', () => {
 describe('checkAgainstVaultDetailed', () => {
   it('空知识库 → 无匹配', async () => {
     const vault = new Vault();
+    installListAdapter(vault);
     const notes: AtomicNote[] = [
       { title: '测试笔记', content: '这是一段测试内容，包含足够长度的文本用于去重比对。' },
     ];
@@ -183,6 +212,7 @@ describe('checkAgainstVaultDetailed', () => {
 
   it('完全相同的笔记被检测为重复', async () => {
     const vault = new Vault();
+    installListAdapter(vault);
     const content = '机器学习是人工智能的核心分支，通过算法从数据中自动学习模式和规律，深度学习在其中扮演着关键角色。';
     vault.addFile('existing/note1.md', `# 机器学习\n\n${content}`);
 
@@ -198,6 +228,7 @@ describe('checkAgainstVaultDetailed', () => {
 
   it('完全不同的笔记无匹配', async () => {
     const vault = new Vault();
+    installListAdapter(vault);
     vault.addFile(
       'existing/recipe.md',
       '# 红烧肉\n\n红烧肉制作关键在于火候控制，五花肉焯水去血沫，冰糖炒色，加酱油料酒慢炖。',
@@ -214,6 +245,7 @@ describe('checkAgainstVaultDetailed', () => {
 
   it('多条笔记中混合匹配', async () => {
     const vault = new Vault();
+    installListAdapter(vault);
     const content = '深度学习TensorFlow框架PyTorch在计算机视觉和自然语言处理NLP领域取得了突破性进展Transformer架构效果显著。';
     vault.addFile('notes/ml.md', `# ML\n\n${content}`);
 
@@ -238,6 +270,7 @@ describe('checkAgainstVaultDetailed', () => {
 
   it('不同文件夹的笔记互不干扰', async () => {
     const vault = new Vault();
+    installListAdapter(vault);
     const content = '机器学习人工智能深度学习神经网络Transformer架构自注意力机制大型预训练模型';
     vault.addFile('folderA/note.md', `# Note A\n\n${content}`);
     vault.addFile('folderB/note.md', '# Note B\n\n完全不同不相关话题美食烹饪文化历史地理旅行摄影音乐');
