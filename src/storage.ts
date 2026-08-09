@@ -4,6 +4,7 @@
  */
 
 import { App, normalizePath } from 'obsidian';
+import { getFolderMarkdownFiles } from './deduplicator';
 import { AtomicNote } from './utils/notes-standards';
 import { MAX_FILENAME_LENGTH } from './constants';
 
@@ -142,12 +143,9 @@ export async function saveNotes(
     // 确保目标文件夹存在
     await ensureFolder(app, fullConfig.targetFolder);
 
-    // 预获取目标文件夹中已存在的文件列表（优化：一次性获取）
-    const existingFiles = app.vault.getMarkdownFiles();
+    // 预获取目标文件夹中已存在的文件列表（仅列举目标文件夹，不枚举全库）
     const existingPaths = new Set(
-      existingFiles
-        .filter((f) => f.path.startsWith(fullConfig.targetFolder + '/'))
-        .map((f) => f.path),
+      getFolderMarkdownFiles(app.vault, fullConfig.targetFolder).map((f) => f.path),
     );
 
     // 批量生成文件名和内容

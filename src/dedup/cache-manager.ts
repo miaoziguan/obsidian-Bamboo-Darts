@@ -12,7 +12,7 @@ import {
   MIN_TOKENS_THRESHOLD,
   IDF_SMOOTH,
 } from '../constants';
-import { isPathInFolder } from '../deduplicator';
+import { getFolderMarkdownFiles } from '../deduplicator';
 
 // ─── 内部类型 ───
 
@@ -110,9 +110,8 @@ export class DedupCacheManager {
     // 索引缓存笔记路径
     const cacheByPath = new Map(cached.notes.map((n) => [n.path, n]));
 
-    // 当前 vault 中的文件
-    const allFiles = vault.getMarkdownFiles();
-    const folderFiles = allFiles.filter((f) => isPathInFolder(f.path, targetFolder));
+    // 当前 vault 中目标文件夹的文件（仅列举该目录，不枚举全库）
+    const folderFiles = getFolderMarkdownFiles(vault, targetFolder);
 
     // 删除/变动的文件：移除 DF 贡献并剔除
     for (const note of cached.notes) {

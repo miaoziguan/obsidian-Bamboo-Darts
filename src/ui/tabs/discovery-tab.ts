@@ -1,5 +1,5 @@
 import { AtomicNotesPlugin } from '../../main';
-import { TFile } from 'obsidian';
+import { getFolderMarkdownFiles } from '../../deduplicator';
 import { buildSimilarityMatrix, mmrRerank, NoteMeta, SimilarityIndex, invalidateDiscoveryCache } from '../../discovery/similarity-matrix';
 
 /**
@@ -79,12 +79,9 @@ export class DiscoveryTab {
       }
     }
 
-    // 索引不可用时回退到文件列表
+    // 索引不可用时回退到文件列表（仅列举目标文件夹，避免枚举全库）
     if (noteMetas.length === 0) {
-      const allFiles = app.vault.getMarkdownFiles();
-      const files = settings.targetFolder
-        ? allFiles.filter((f: TFile) => f.path.startsWith(settings.targetFolder))
-        : allFiles;
+      const files = getFolderMarkdownFiles(app.vault, settings.targetFolder);
 
       for (const file of files) {
         const title = file.path.split('/').pop()!.replace(/\.md$/, '');

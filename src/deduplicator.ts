@@ -100,6 +100,34 @@ export function isPathInFolder(filePath: string, targetFolder: string): boolean 
   return false;
 }
 
+/**
+ * 获取目标文件夹下的 Markdown 文件。
+ *
+ * 安全考量：本插件功能上只处理用户显式配置的 `targetFolder`，不应在内存中持有
+ * 全库所有文件路径，也不应把任何文件清单发往外部。所有调用点都必须传入
+ * `targetFolder` 以严格限定范围。
+ *
+ * - `targetFolder` 非空：先尝试 `vault.getAllLoadedFiles()`（更直接地按目录过滤），
+ *   若运行环境未提供该方法则回退到 `vault.getMarkdownFiles().filter(...)`。
+ *   两种实现都只在返回前保留目标目录下的文件。
+ * - `targetFolder` 为空（极少数回退场景）：允许全库读取，但调用方应自带上限保护。
+ */
+export function getFolderMarkdownFiles(vault: Vault, targetFolder?: string): TFile[] {
+  if (targetFolder && targetFolder.trim() !== '') {
+    const folder = targetFolder.trim();
+    const all = typeof vault.getAllLoadedFiles === 'function'
+      ? vault.getAllLoadedFiles()
+      : vault.getMarkdownFiles();
+    return all.filter(
+      (f): f is TFile =>
+        f instanceof TFile &&
+        f.extension === 'md' &&
+        isPathInFolder(f.path, folder),
+    );
+  }
+  return vault.getMarkdownFiles();
+}
+
 // ─── Phase 4: 同批交叉去重 ───
 
 /** 分片大小：每处理 N 条笔记 yield 一次主线程 */
@@ -208,8 +236,7 @@ async function loadAndPreprocessExistingNotes(
   targetFolder: string,
   cacheManager: DedupCacheManager,
 ): Promise<{ notes: CachedNote[]; idfTable: IdfTable; dfCounts: Map<string, number> }> {
-  const allFiles = vault.getMarkdownFiles();
-  const existingFiles = allFiles.filter((file) => isPathInFolder(file.path, targetFolder));
+  const existingFiles = getFolderMarkdownFiles(vault, targetFolder);
 
   // 获取持久化特征缓存，用于跳过未变动文件
   const featureFolderData = cacheManager.getFeatureFolderData(targetFolder);
@@ -471,9 +498,8 @@ export async function checkAgainstVaultDetailed(
 
   // 语义去重（Beta）：用混元向量模型精判
   if (semanticManager) {
-    // 获取知识库文件列表
-    const allFiles = vault.getMarkdownFiles();
-    const vaultFiles = allFiles.filter((f) => isPathInFolder(f.path, targetFolder));
+    // 获取知识库文件列表（仅目标文件夹）
+    const vaultFiles = getFolderMarkdownFiles(vault, targetFolder);
 
     // 构造预加载参数（含懒加载的内容读取回调）
     const preloadItems = vaultFiles.map((f) => ({

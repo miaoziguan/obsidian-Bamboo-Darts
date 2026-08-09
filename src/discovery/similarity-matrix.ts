@@ -3,6 +3,7 @@
  */
 
 import { Vault } from 'obsidian';
+import { getFolderMarkdownFiles } from '../deduplicator';
 import { extractKeywordSet } from '../utils/tokenizer';
 import { jaccardSimilarity } from '../utils/jaccard';
 import { DEDUP_BATCH_SIZE } from '../constants';
@@ -230,12 +231,9 @@ export async function buildSimilarityMatrix(
     keywordSets = sliced.map((f) => f.keywords);
   }
 
-  // 索引未启用或为空时，回退到读文件
+  // 索引未启用或为空时，回退到读文件（仅列举目标文件夹，避免枚举全库）
   if (notes.length === 0) {
-    const allFiles = vault.getMarkdownFiles();
-    const files = targetFolder
-      ? allFiles.filter((f) => f.path === targetFolder || f.path.startsWith(targetFolder + '/'))
-      : allFiles;
+    const files = getFolderMarkdownFiles(vault, targetFolder);
 
     const limit = Math.min(files.length, maxNotes);
     for (let i = 0; i < limit; i += DEDUP_BATCH_SIZE) {

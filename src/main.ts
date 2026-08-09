@@ -8,7 +8,7 @@
 import { Plugin, Notice, Editor, MarkdownView, Menu, MenuItem, TFile, Platform } from 'obsidian';
 import { AtomicNotesSettingTab, PluginSettings, DEFAULT_SETTINGS } from './ui/setting-tab';
 import { clearUrlCache } from './extractor';
-import { isPathInFolder, clearDedupCache, getDefaultDedupCache } from './deduplicator';
+import { clearDedupCache, getDefaultDedupCache, getFolderMarkdownFiles } from './deduplicator';
 import { DiscoveryIndex } from './discovery/index-manager';
 import { invalidateDiscoveryCache } from './discovery/similarity-matrix';
 import { stripImageNoise } from './utils/clipboard';
@@ -521,10 +521,7 @@ export default class AtomicNotesPlugin extends Plugin {
   private async scanFolderNotes(
     folder?: string,
   ): Promise<RelatedNoteFeature[]> {
-    const files = this.app.vault.getMarkdownFiles();
-    const filtered = folder
-      ? files.filter((f) => f.path === folder || f.path.startsWith(folder + '/'))
-      : files;
+    const filtered = getFolderMarkdownFiles(this.app.vault, folder);
     const out: RelatedNoteFeature[] = [];
     // 上限保护，避免超大库阻塞查询
     for (const f of filtered.slice(0, 500)) {
@@ -641,8 +638,7 @@ export default class AtomicNotesPlugin extends Plugin {
 
     const targetFolder =
       this.settings.dedupTargetFolder?.trim() || this.settings.targetFolder || '原子笔记';
-    const allFiles = this.app.vault.getMarkdownFiles();
-    const files = allFiles.filter((f) => isPathInFolder(f.path, targetFolder));
+    const files = getFolderMarkdownFiles(this.app.vault, targetFolder);
     if (files.length === 0) {
       new Notice(`目标文件夹 "${targetFolder}" 中没有 Markdown 文件`);
       return;
