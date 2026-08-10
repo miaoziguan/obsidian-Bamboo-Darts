@@ -167,6 +167,12 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /** 分区标题：用 Obsidian 原生 setting-item-heading 样式，视觉层级规范统一 */
+  private addSectionTitle(containerEl: HTMLElement, text: string): void {
+    const el = containerEl.createEl('h3', { text });
+    el.addClass('setting-item-heading');
+  }
+
   /** 在分区之间插入轻量分割线 */
   private addDivider(containerEl: HTMLElement): void {
     containerEl.createEl('hr', {
@@ -175,6 +181,37 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           'margin:20px 0 16px;border:none;border-top:1px solid var(--background-modifier-border)',
       },
     });
+  }
+
+  /**
+   * 统一创建「数字输入」设置行：移动端弹出数字键盘、限制非法字符。
+   * onChange 收到的已是 Number 类型，校验失败（NaN/越界）时忽略本次输入。
+   */
+  private addNumberSetting(
+    containerEl: HTMLElement,
+    name: string,
+    desc: string,
+    value: number,
+    min: number,
+    max: number,
+    onCommit: (v: number) => void,
+  ): void {
+    new Setting(containerEl)
+      .setName(name)
+      .setDesc(desc)
+      .addText((text) => {
+        text.inputEl.type = 'number';
+        text.inputEl.min = String(min);
+        text.inputEl.max = String(max);
+        text.setValue(String(value));
+        text.onChange(async (raw) => {
+          const num = Number(raw);
+          if (raw.trim() !== '' && !isNaN(num) && num >= min && num <= max) {
+            onCommit(num);
+            await this.plugin.saveSettings();
+          }
+        });
+      });
   }
 
   display(): void {
@@ -198,7 +235,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   // ══════════════════════════════════════════
 
   private buildApiSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h3', { text: 'API 配置' });
+    this.addSectionTitle(containerEl, 'API 配置');
     containerEl.createEl('p', {
       text: '零配置开箱即用：除 API Key 外，模型、温度、嵌入等参数均已设好默认值。填完 Key 直接选中文本右键「提炼原子笔记」即可。',
       cls: 'atomic-notes-hint',
@@ -217,9 +254,9 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           });
         text.inputEl.type = 'password';
       })
-      .addButton((btn) =>
+      .addExtraButton((btn) =>
         btn
-          .setButtonText('获取 Key')
+          .setIcon('external-link')
           .setTooltip('前往 DeepSeek 官网注册并获取 API Key')
           .onClick(() => {
             window.open('https://platform.deepseek.com/api_keys', '_blank');
@@ -234,14 +271,6 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           this.plugin.settings.deepseekApiUrl = value.trim();
           await this.plugin.saveSettings();
         }),
-      )
-      .addButton((btn) =>
-        btn
-          .setButtonText('获取 Key')
-          .setTooltip('前往 DeepSeek 官网注册并获取 API Key')
-          .onClick(() => {
-            window.open('https://platform.deepseek.com/api_keys', '_blank');
-          }),
       );
 
     new Setting(containerEl)
@@ -254,18 +283,17 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl)
-      .setName('最大 Token 数')
-      .setDesc('AI 输出的最大 Token 数（默认：6000）')
-      .addText((text) =>
-        text.setValue(String(this.plugin.settings.maxTokens)).onChange(async (value) => {
-          const num = parseInt(value, 10);
-          if (!isNaN(num) && num > 0) {
-            this.plugin.settings.maxTokens = num;
-            await this.plugin.saveSettings();
-          }
-        }),
-      );
+    this.addNumberSetting(
+      containerEl,
+      '最大 Token 数',
+      'AI 输出的最大 Token 数（默认：6000）',
+      this.plugin.settings.maxTokens,
+      1,
+      32000,
+      (v) => {
+        this.plugin.settings.maxTokens = v;
+      },
+    );
 
     // 测试连接（紧邻 API 配置）
     new Setting(containerEl)
@@ -285,7 +313,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   // ══════════════════════════════════════════
 
   private buildStorageSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h3', { text: '存储配置' });
+    this.addSectionTitle(containerEl, '存储配置');
 
     new Setting(containerEl)
       .setName('目标文件夹')
@@ -340,7 +368,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   // ══════════════════════════════════════════
 
   private buildSemanticSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h3', { text: '语义去重（Beta）' });
+    this.addSectionTitle(containerEl, '语义去重（Beta）');
 
     const _semToggle = new Setting(containerEl)
       .setName('启用语义去重')
@@ -367,9 +395,9 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
             });
           text.inputEl.type = 'password';
         })
-        .addButton((btn) =>
+        .addExtraButton((btn) =>
           btn
-            .setButtonText('获取 Key')
+            .setIcon('external-link')
             .setTooltip('前往腾讯混元官网注册并获取 API Key')
             .onClick(() => {
               window.open('https://hunyuan.tencent.com/portal/guide', '_blank');
@@ -451,7 +479,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   // ══════════════════════════════════════════
 
   private buildContentSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h3', { text: '标签偏好' });
+    this.addSectionTitle(containerEl, '标签偏好');
 
     new Setting(containerEl)
       .setName('标签词汇表')
@@ -488,7 +516,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // ================================================================
     // ⑤ 双向链接（集成）
     // ================================================================
-    containerEl.createEl('h3', { text: '双向链接' });
+    this.addSectionTitle(containerEl, '双向链接');
 
     new Setting(containerEl)
       .setName('自动创建源文件反向链接')
@@ -505,7 +533,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // ================================================================
     // ⑥ 内容核查（质量保障 1）
     // ================================================================
-    containerEl.createEl('h3', { text: '内容核查' });
+    this.addSectionTitle(containerEl, '内容核查');
 
     new Setting(containerEl)
       .setName('启用内容核查')
@@ -534,7 +562,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // ================================================================
     // ⑦ 笔记复查（质量保障 2 — AI 双重保险）
     // ================================================================
-    containerEl.createEl('h3', { text: '笔记复查（AI 双重保险）' });
+    this.addSectionTitle(containerEl, '笔记复查（AI 双重保险）');
 
     const _reviewToggleSetting = new Setting(containerEl)
       .setName('启用笔记复查')
@@ -598,7 +626,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   // ══════════════════════════════════════════
 
   private buildDiscoverySection(containerEl: HTMLElement): void {
-    containerEl.createEl('h3', { text: '笔记发现' });
+    this.addSectionTitle(containerEl, '笔记发现');
 
     new Setting(containerEl)
       .setName('启用关联推荐')
@@ -623,21 +651,18 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           }),
         );
 
-      new Setting(containerEl)
-        .setName('最多比较多少条笔记')
-        .setDesc('参与关联计算的笔记数量上限。数量越多结果越全，但计算也越慢（默认 500）')
-        .addText((text) =>
-          text
-            .setValue(String(this.plugin.settings.discoveryMaxNotes))
-            .onChange(async (value) => {
-              const num = parseInt(value, 10);
-              if (!isNaN(num) && num >= 50 && num <= 10000) {
-                this.plugin.settings.discoveryMaxNotes = num;
-                await this.plugin.saveSettings();
-                invalidateDiscoveryCache();
-              }
-            }),
-        );
+      this.addNumberSetting(
+        containerEl,
+        '最多比较多少条笔记',
+        '参与关联计算的笔记数量上限。数量越多结果越全，但计算也越慢（默认 500）',
+        this.plugin.settings.discoveryMaxNotes,
+        50,
+        10000,
+        (v) => {
+          this.plugin.settings.discoveryMaxNotes = v;
+          invalidateDiscoveryCache();
+        },
+      );
 
       new Setting(containerEl)
         .setName('最低相似度')
@@ -669,21 +694,18 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
             }),
         );
 
-      new Setting(containerEl)
-        .setName('最多展示几条推荐')
-        .setDesc('关联推荐列表里最多显示多少条笔记（默认 10）')
-        .addText((text) =>
-          text
-            .setValue(String(this.plugin.settings.discoveryTopK))
-            .onChange(async (value) => {
-              const num = parseInt(value, 10);
-              if (!isNaN(num) && num >= 1 && num <= 50) {
-                this.plugin.settings.discoveryTopK = num;
-                await this.plugin.saveSettings();
-                invalidateDiscoveryCache();
-              }
-            }),
-        );
+      this.addNumberSetting(
+        containerEl,
+        '最多展示几条推荐',
+        '关联推荐列表里最多显示多少条笔记（默认 10）',
+        this.plugin.settings.discoveryTopK,
+        1,
+        50,
+        (v) => {
+          this.plugin.settings.discoveryTopK = v;
+          invalidateDiscoveryCache();
+        },
+      );
     }
 
     this.addDivider(containerEl);
@@ -694,7 +716,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   // ══════════════════════════════════════════
 
   private buildFilterSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h3', { text: '过滤策略' });
+    this.addSectionTitle(containerEl, '过滤策略');
 
     new Setting(containerEl).setDesc(
       '不同类型的文章需要不同的过滤强度。技术文献信息密集，应保留更多笔记；观点评论注重精华，只保留最有价值的洞见。',
@@ -882,7 +904,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   // ══════════════════════════════════════════
 
   private buildAdvancedSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h3', { text: '深度提炼' });
+    this.addSectionTitle(containerEl, '深度提炼');
 
     new Setting(containerEl)
       .setName('启用深度提炼模式')
@@ -894,22 +916,17 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl)
-      .setName('输入截断长度')
-      .setDesc(
-        '超过此字数的文本将被截断后再发送给 AI（默认 10000 字，增大可保留更多内容但消耗更多 token）',
-      )
-      .addText((text) =>
-        text
-          .setValue(String(this.plugin.settings.inputTruncateLength ?? INPUT_TRUNCATE_LENGTH))
-          .onChange(async (value) => {
-            const num = parseInt(value, 10);
-            if (!isNaN(num) && num >= 1000) {
-              this.plugin.settings.inputTruncateLength = num;
-              await this.plugin.saveSettings();
-            }
-          }),
-      );
+    this.addNumberSetting(
+      containerEl,
+      '输入截断长度',
+      '超过此字数的文本将被截断后再发送给 AI（默认 10000 字，增大可保留更多内容但消耗更多 token）',
+      this.plugin.settings.inputTruncateLength ?? INPUT_TRUNCATE_LENGTH,
+      1000,
+      100000,
+      (v) => {
+        this.plugin.settings.inputTruncateLength = v;
+      },
+    );
 
     this.addDivider(containerEl);
   }
@@ -919,7 +936,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
   // ══════════════════════════════════════════
 
   private buildPanelSection(containerEl: HTMLElement): void {
-    containerEl.createEl('h3', { text: '面板设置' });
+    this.addSectionTitle(containerEl, '面板设置');
 
     new Setting(containerEl)
       .setName('面板位置')
