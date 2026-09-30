@@ -13,7 +13,9 @@ set -euo pipefail
 # ─── 路径配置 ───
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
-VAULT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/test-vault"
+# 默认同步到本机实际使用的 CJ vault；
+# 如需临时同步到其他仓库，可用环境变量覆盖：VAULT_DIR=/path/to/vault bash sync.sh
+VAULT_DIR="${VAULT_DIR:-/Users/pokerhu/Downloads/CJ/obsidian-vault}"
 PLUGIN_ID="atomic-notes-extractor"
 PLUGIN_DEST="$VAULT_DIR/.obsidian/plugins/$PLUGIN_ID"
 
@@ -30,7 +32,7 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 # ─── 前置检查 ───
 [ -f "$PROJECT_DIR/package.json" ] || error "找不到 package.json，请在项目根目录运行"
 [ -f "$PROJECT_DIR/esbuild.config.mjs" ] || error "找不到 esbuild.config.mjs"
-[ -d "$VAULT_DIR" ] || error "找不到测试仓库: $VAULT_DIR"
+[ -d "$VAULT_DIR" ] || error "找不到目标 vault 仓库: $VAULT_DIR"
 
 # ─── 参数解析 ───
 MODE="production"
@@ -110,9 +112,9 @@ echo ""
 BUILD_SIZE=$(wc -c < "$PLUGIN_DEST/main.js" | tr -d ' ')
 
 if [ "$MODE" = "dev" ]; then
-  info "开发版已同步到测试仓库 (${BUILD_SIZE} bytes, 含 sourcemap)"
+  info "开发版已同步到目标仓库 (${BUILD_SIZE} bytes, 含 sourcemap)"
 else
-  info "正式版已同步到测试仓库 (${BUILD_SIZE} bytes)"
+  info "正式版已同步到目标仓库 (${BUILD_SIZE} bytes)"
 fi
 
 echo "  目标: $PLUGIN_DEST"
