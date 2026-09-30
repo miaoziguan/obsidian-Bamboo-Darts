@@ -312,7 +312,7 @@ export default class AtomicNotesPlugin extends Plugin {
         if (stored && !stored.startsWith('enc:')) {
           needsReEncrypt = true; // 旧明文 → 需要升级加密
         }
-        const decrypted = decryptApiKey(stored);
+        const decrypted = await decryptApiKey(stored);
         if (decrypted !== null) this.settings[field] = decrypted;
       }
       if (needsReEncrypt) {
@@ -328,9 +328,9 @@ export default class AtomicNotesPlugin extends Plugin {
     // 加密 API Key 再写入磁盘（内存保持明文，前端无感知）
     await this.saveData({
       ...this.settings,
-      deepseekApiKey: encryptApiKey(this.settings.deepseekApiKey),
-      hunyuanApiKey: encryptApiKey(this.settings.hunyuanApiKey || ''),
-      reviewApiKey: encryptApiKey(this.settings.reviewApiKey || ''),
+      deepseekApiKey: await encryptApiKey(this.settings.deepseekApiKey),
+      hunyuanApiKey: await encryptApiKey(this.settings.hunyuanApiKey || ''),
+      reviewApiKey: await encryptApiKey(this.settings.reviewApiKey || ''),
     });
   }
 

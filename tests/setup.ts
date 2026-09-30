@@ -6,6 +6,13 @@
  */
 
 import { JSDOM } from 'jsdom';
+import { webcrypto } from 'node:crypto';
+
+// Web Crypto 全局：Obsidian/Electron 原生提供 crypto.subtle，但 Node 测试环境的
+// worker 上下文未必暴露，这里按需补齐，确保 crypto-store 的 Web Crypto 实现可测试。
+if (!(globalThis as Record<string, unknown>).crypto) {
+  (globalThis as Record<string, unknown>).crypto = webcrypto;
+}
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
 
